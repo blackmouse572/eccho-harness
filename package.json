@@ -16,7 +16,7 @@
   "devDependencies": {
     "@flue/cli": "^1.0.0-beta.5",
     "@types/bun": "latest",
-    "wrangler": "^4.104.0"
+    "wrangler": "^4.105.0"
   },
   "peerDependencies": {
     "typescript": "^5"
