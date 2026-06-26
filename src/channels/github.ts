@@ -4,6 +4,8 @@ import { dispatch } from '@flue/runtime';
 import prReviewer from '../agents/pr-reviewer.ts';
 import issueClassifier from '../agents/issue-classifier.ts';
 import issueTriager from '../agents/issue-triager.ts';
+import { createPullRequestGateway } from '../shared/pull-requests.ts';
+
 // The bot authenticates with a PAT, so its OWN comments arrive as sender type
 // `User`, not `Bot`. Without this, the bot would react to (and loop on) its own
 // reviews/replies. Set GITHUB_BOT_LOGIN to the PAT account's login to skip them.
@@ -15,6 +17,25 @@ function isSelf(sender: { type: string; login: string }): boolean {
 // Don't review PRs opened by bots (Dependabot, Renovate, …) — dependency bumps
 // are config-only noise. Set REVIEW_BOT_PRS=true to opt back in.
 const REVIEW_BOT_PRS = process.env.REVIEW_BOT_PRS === 'true';
+
+// Deterministic acknowledgment: react 👀 on the incoming PR comment so the user
+// immediately sees it's being processed. A guaranteed pipeline step, not left to
+// the agent to remember. Best-effort — never block admission on it.
+async function ackProcessing(
+	ref: { owner: string; repo: string; pr: number },
+	commentId: number,
+	commentType: 'issue' | 'review',
+): Promise<void> {
+	try {
+		await createPullRequestGateway({ owner: ref.owner, repo: ref.repo, issueNumber: ref.pr }).react({
+			commentId,
+			commentType,
+			content: 'eyes',
+		});
+	} catch {
+		// ignore — the signal is best-effort
+	}
+}
 
 // Verified GitHub webhook ingress. `GITHUB_WEBHOOK_SECRET` authenticates inbound
 // deliveries; outbound Octokit calls live in ../shared/pull-requests.ts.
@@ -135,6 +156,7 @@ export const channel = createGitHubChannel({
 
 			const owner = repository.owner.login;
 			const repo = repository.name;
+			await ackProcessing({ owner, repo, pr: issue.number }, comment.id, 'issue');
 			await dispatch(prReviewer, {
 				id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
 				input: {
@@ -159,6 +181,7 @@ export const channel = createGitHubChannel({
 
 			const owner = repository.owner.login;
 			const repo = repository.name;
+			await ackProcessing({ owner, repo, pr: pull_request.number }, comment.id, 'review');
 			await dispatch(prReviewer, {
 				id: channel.conversationKey({ owner, repo, issueNumber: pull_request.number }),
 				input: {
