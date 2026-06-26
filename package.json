@@ -2,6 +2,17 @@
   "name": "eccho-harness",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "dev": "flue dev --target cloudflare",
+    "build": "flue build --target cloudflare",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test",
+    "check": "bunx tsc --noEmit && bun test",
+    "deploy:dry": "flue build --target cloudflare && wrangler deploy --dry-run --config dist/eccho_pr_reviewer/wrangler.json",
+    "deploy": "flue build --target cloudflare && wrangler deploy --config dist/eccho_pr_reviewer/wrangler.json",
+    "deploy:secrets": "wrangler secret put DEEPSEEK_API_KEY --name eccho-pr-reviewer && wrangler secret put GITHUB_TOKEN --name eccho-pr-reviewer && wrangler secret put GITHUB_WEBHOOK_SECRET --name eccho-pr-reviewer",
+    "review": "flue run review-pull-request --target cloudflare --env .dev.vars"
+  },
   "devDependencies": {
     "@flue/cli": "^1.0.0-beta.5",
     "@types/bun": "latest",
