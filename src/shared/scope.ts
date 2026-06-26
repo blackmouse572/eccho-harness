@@ -36,6 +36,31 @@ function classify(file: ChangedFile) {
 	return { isDoc, isTest, isConfig, isSource };
 }
 
+/** Whether a path is source code (not docs or config). */
+export function isSourceFile(filename: string): boolean {
+	return !DOC_RE.test(filename) && !CONFIG_RE.test(filename);
+}
+
+/**
+ * Select the files one specialist actually needs (#4 — scope the diff per
+ * reviewer instead of feeding every reviewer the whole PR). Returns an empty
+ * array only when nothing matches; callers fall back to the full set.
+ */
+export function filesForDimension<T extends { filename: string }>(dim: ReviewDimension, files: T[]): T[] {
+	switch (dim) {
+		case 'architecture':
+			return files.filter((f) => isSourceFile(f.filename));
+		case 'testing':
+			return files.filter((f) => isSourceFile(f.filename) || TEST_RE.test(f.filename));
+		case 'security': {
+			const sensitive = files.filter((f) => SECURITY_RE.test(f.filename));
+			return sensitive.length ? sensitive : files.filter((f) => isSourceFile(f.filename));
+		}
+		case 'domain':
+			return files.filter((f) => isSourceFile(f.filename) && !TEST_RE.test(f.filename));
+	}
+}
+
 /** Assess a PR's change set and recommend which specialist reviewers to run. */
 export function assessScope(files: ChangedFile[]): ScopeAssessment {
 	const totalChanges = files.reduce((n, f) => n + f.additions + f.deletions, 0);

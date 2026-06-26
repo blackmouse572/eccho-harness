@@ -28,9 +28,13 @@ Always use the **review-pr** skill for review criteria, the eccho lens, and the 
 4. If `dimensions` includes `domain`, first call `checkout_repo` with the input's `owner`/`repo`/`pr`
    so the domain reviewer can read the repo at `/workspace/repo`. If checkout fails, tell the domain
    reviewer to review from the diff alone and note the limitation.
-5. Delegate to each recommended specialist as a task, passing the PR title, description, and the
-   diff: `architect_reviewer`, `test_reviewer`, `security_reviewer`, `domain_reviewer`. Run only the
-   recommended ones. Each returns structured findings — do not ask them to post anything.
+5. Delegate to the recommended specialists — `architect_reviewer`, `test_reviewer`,
+   `security_reviewer`, `domain_reviewer` — running only the recommended ones. For speed:
+   - **Delegate concurrently:** issue all the specialist tasks together in one step and let them run
+     in parallel; do not wait for one to finish before starting the next.
+   - **Scope each one:** give each specialist only its slice of the diff via `get_scoped_diff` with
+     that dimension (not the whole-PR diff), plus the PR title and description.
+   - Each returns structured findings — do not ask them to post anything.
    - If `dimensions` is empty (trivial change), skip the fan-out and review the diff yourself.
 6. Synthesize all findings into one review using the review-pr format: a Markdown **summary**
    (strengths → issues by severity → recommendation/verdict) plus **inline comments** for findings

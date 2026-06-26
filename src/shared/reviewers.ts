@@ -1,6 +1,7 @@
 import { defineAgentProfile } from "@flue/runtime";
 import * as v from "valibot";
-import type { ReviewDimension } from "./scope.ts";
+import { filesForDimension, type ReviewDimension } from "./scope.ts";
+import type { ChangedFile } from "./pull-requests.ts";
 
 // Specialist reviewers, delegated to by the master agent via session.task().
 // They RETURN structured findings; they do not post to GitHub — the master
@@ -22,13 +23,16 @@ export const FindingsSchema = v.object({
 });
 export type Findings = v.InferOutput<typeof FindingsSchema>;
 
-// Specialists run focused, parallel reviews — Flash is enough; the master
-// orchestrator runs Pro. Profiles inherit the parent model unless set here.
+// Specialists run focused, parallel reviews on a scoped slice of the diff —
+// Flash + low reasoning is enough and keeps latency down. Profiles inherit the
+// parent model/thinking unless set here.
 const SPECIALIST_MODEL = "deepseek/deepseek-v4-flash";
+const SPECIALIST_THINKING = "low" as const;
 
 export const architectReviewer = defineAgentProfile({
   name: "architect_reviewer",
   model: SPECIALIST_MODEL,
+  thinkingLevel: SPECIALIST_THINKING,
   description:
     "Reviews architecture: separation of concerns, coupling, abstractions, scalability, and how the change integrates with surrounding code.",
   instructions:
@@ -38,6 +42,7 @@ export const architectReviewer = defineAgentProfile({
 export const testReviewer = defineAgentProfile({
   name: "test_reviewer",
   model: SPECIALIST_MODEL,
+  thinkingLevel: SPECIALIST_THINKING,
   description:
     "Reviews testing under a TDD workflow: are changed behaviors covered by tests that assert real behavior, and do tests look written test-first?",
   instructions:
@@ -47,6 +52,7 @@ export const testReviewer = defineAgentProfile({
 export const securityReviewer = defineAgentProfile({
   name: "security_reviewer",
   model: SPECIALIST_MODEL,
+  thinkingLevel: SPECIALIST_THINKING,
   description:
     "Reviews security: authn/authz, input validation, injection, secrets, SSRF, and multi-tenant isolation.",
   instructions:
@@ -56,6 +62,7 @@ export const securityReviewer = defineAgentProfile({
 export const domainReviewer = defineAgentProfile({
   name: "domain_reviewer",
   model: SPECIALIST_MODEL,
+  thinkingLevel: SPECIALIST_THINKING,
   description:
     "Reviews eccho domain alignment against PRDs/ADRs/CONTEXT using the repo checkout at /workspace/repo.",
   instructions:
@@ -101,4 +108,20 @@ export function buildSpecialistPrompt(args: {
     "",
     "Return your findings as structured data.",
   ].join("\n");
+}
+
+/**
+ * Build the slice of the diff one specialist needs (#4). Each reviewer sees only
+ * its relevant files instead of the whole PR — fewer tokens, faster, cheaper.
+ * Falls back to all files when nothing matches the dimension.
+ */
+export function scopedDiff(dimension: ReviewDimension, files: ChangedFile[]): string {
+  const relevant = filesForDimension(dimension, files);
+  const chosen = relevant.length ? relevant : files;
+  return chosen
+    .map(
+      (f) =>
+        `=== ${f.filename} (${f.status} +${f.additions}/-${f.deletions}) ===\n${f.patch || "(no patch — binary or too large)"}`,
+    )
+    .join("\n\n");
 }

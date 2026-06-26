@@ -24,8 +24,8 @@ type Env = { Sandbox: Parameters<typeof getSandbox>[0] };
 export default defineAgent<Env>(({ id, env }) => {
 	const gateway = createPullRequestGateway(channel.parseConversationKey(id));
 	return {
-		model: 'deepseek/deepseek-v4-pro', // orchestration model; specialists run Flash
-		thinkingLevel: 'high',
+		model: 'deepseek/deepseek-v4-flash', // orchestration; specialists also Flash + low
+		thinkingLevel: 'medium',
 		instructions,
 		// Container-backed sandbox for the domain reviewer's repo checkout. The
 		// container only starts when checkout_repo actually runs a command.

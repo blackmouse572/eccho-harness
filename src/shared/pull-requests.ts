@@ -21,6 +21,8 @@ export type ChangedFile = {
 	status: string;
 	additions: number;
 	deletions: number;
+	/** This file's unified diff hunk (empty for binary/too-large files). */
+	patch: string;
 };
 
 export type PullRequest = {
@@ -100,6 +102,7 @@ export function createPullRequestGateway(ref: PullRequestRef): PullRequestGatewa
 					status: f.status,
 					additions: f.additions,
 					deletions: f.deletions,
+					patch: f.patch ?? '',
 				})),
 			};
 		},

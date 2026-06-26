@@ -11,6 +11,7 @@ import {
 	buildSpecialistPrompt,
 	dimensionAgent,
 	reviewerProfiles,
+	scopedDiff,
 	type Findings,
 } from '../shared/reviewers.ts';
 
@@ -23,8 +24,8 @@ import {
 type Env = { Sandbox: Parameters<typeof getSandbox>[0] };
 
 const coordinator = defineAgent<Env>(({ id, env }) => ({
-	model: 'deepseek/deepseek-v4-pro',
-	thinkingLevel: 'high',
+	model: 'deepseek/deepseek-v4-flash',
+	thinkingLevel: 'medium',
 	sandbox: cloudflareSandbox(getSandbox(env.Sandbox, id)),
 	cwd: '/workspace',
 	skills: [reviewPr],
@@ -73,37 +74,35 @@ export default defineWorkflow({
 			return { reviewUrl: existing.url, dimensions, deduped: true };
 		}
 
-		// 3. Whole-PR diff.
-		const diff = await gw.diff();
-
-		// 4. Checkout for the domain reviewer (container sandbox), if needed.
+		// 3. Checkout for the domain reviewer (container sandbox), if needed.
 		if (dimensions.includes('domain')) {
 			await checkoutPrHead(harness, { owner, repo, pr });
 		}
 
-		// 5. Fan out to the recommended specialists (separate sessions, sequential
-		//    to avoid per-session operation contention).
-		const findings: Array<{ dimension: string } & Findings> = [];
-		for (const dimension of dimensions) {
-			const session = await harness.session(dimension);
-			const res = await session.task(
-				buildSpecialistPrompt({
-					dimension,
-					prTitle: prInfo.title,
-					prBody: prInfo.body,
-					diff,
-				}),
-				{ agent: dimensionAgent[dimension], result: FindingsSchema },
-			);
-			findings.push({ dimension, ...res.data });
-		}
+		// 4. Fan out to the recommended specialists IN PARALLEL — each gets only
+		//    its scoped slice of the diff. Separate sessions avoid contention.
+		const findings: Array<{ dimension: string } & Findings> = await Promise.all(
+			dimensions.map(async (dimension) => {
+				const session = await harness.session(dimension);
+				const res = await session.task(
+					buildSpecialistPrompt({
+						dimension,
+						prTitle: prInfo.title,
+						prBody: prInfo.body,
+						diff: scopedDiff(dimension, prInfo.changedFiles),
+					}),
+					{ agent: dimensionAgent[dimension], result: FindingsSchema },
+				);
+				return { dimension, ...res.data };
+			}),
+		);
 
-		// 6. Synthesize one review (or review directly if nothing fanned out).
+		// 5. Synthesize one review (or review the diff directly if nothing fanned out).
 		const synthSession = await harness.session('synthesis');
 		const synthInput =
 			dimensions.length > 0
 				? `Synthesize these specialist findings into one pull-request review for #${pr} ("${prInfo.title}").\n\n${JSON.stringify(findings, null, 2)}`
-				: `Review this trivial change to PR #${pr} ("${prInfo.title}") directly.\n\n\`\`\`diff\n${diff}\n\`\`\``;
+				: `Review this trivial change to PR #${pr} ("${prInfo.title}") directly.\n\n\`\`\`diff\n${await gw.diff()}\n\`\`\``;
 		const synth = await synthSession.skill(reviewPr, {
 			args: { request: synthInput },
 			result: SynthSchema,

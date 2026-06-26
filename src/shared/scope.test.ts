@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { assessScope } from './scope.ts';
+import { assessScope, filesForDimension } from './scope.ts';
 
 test('docs-only change recommends no specialists', () => {
 	const s = assessScope([{ filename: 'README.md', additions: 5, deletions: 1, status: 'modified' }]);
@@ -31,4 +31,18 @@ test('a large source change pulls in all four dimensions', () => {
 	const s = assessScope([{ filename: 'src/big.ts', additions: 500, deletions: 200, status: 'modified' }]);
 	expect(s.size).toBe('large');
 	expect(new Set(s.dimensions)).toEqual(new Set(['architecture', 'testing', 'security', 'domain']));
+});
+
+test('filesForDimension scopes each reviewer to its relevant files', () => {
+	const files = [
+		{ filename: 'src/auth/login.ts' },
+		{ filename: 'src/foo.test.ts' },
+		{ filename: 'src/foo.ts' },
+		{ filename: 'README.md' },
+		{ filename: 'package.json' },
+	];
+	const names = (d: Parameters<typeof filesForDimension>[0]) => filesForDimension(d, files).map((f) => f.filename);
+	expect(names('security')).toEqual(['src/auth/login.ts']);
+	expect(names('domain')).toEqual(['src/auth/login.ts', 'src/foo.ts']);
+	expect(names('architecture')).toEqual(['src/auth/login.ts', 'src/foo.test.ts', 'src/foo.ts']);
 });

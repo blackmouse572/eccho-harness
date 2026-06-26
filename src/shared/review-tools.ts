@@ -1,6 +1,7 @@
 import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import type { PullRequestGateway } from './pull-requests.ts';
+import { scopedDiff } from './reviewers.ts';
 
 // Model-facing tools. Each is a thin adapter over the PullRequestGateway — the
 // model contract (names, descriptions, schemas) lives here; all GitHub behavior
@@ -30,6 +31,16 @@ export function createReviewTools(gw: PullRequestGateway) {
 				head: v.pipe(v.string(), v.minLength(7), v.description('Ending commit SHA (the latest commit to review).')),
 			}),
 			run: async ({ input }) => ({ diff: await gw.rangeDiff(input.base, input.head) }),
+		}),
+
+		defineTool({
+			name: 'get_scoped_diff',
+			description:
+				'Get only the slice of the PR diff relevant to one review dimension (architecture | testing | security | domain). Use this to give each specialist just the files it needs instead of the whole PR — faster and cheaper. Prefer this over get_pull_request_diff when delegating to specialists.',
+			input: v.object({
+				dimension: v.picklist(['architecture', 'testing', 'security', 'domain']),
+			}),
+			run: async ({ input }) => ({ diff: scopedDiff(input.dimension, (await gw.get()).changedFiles) }),
 		}),
 
 		defineTool({
