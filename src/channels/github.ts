@@ -11,6 +11,10 @@ function isSelf(sender: { type: string; login: string }): boolean {
 	return sender.type === 'Bot' || (!!BOT_LOGIN && sender.login.toLowerCase() === BOT_LOGIN);
 }
 
+// Don't review PRs opened by bots (Dependabot, Renovate, …) — dependency bumps
+// are config-only noise. Set REVIEW_BOT_PRS=true to opt back in.
+const REVIEW_BOT_PRS = process.env.REVIEW_BOT_PRS === 'true';
+
 // Verified GitHub webhook ingress. `GITHUB_WEBHOOK_SECRET` authenticates inbound
 // deliveries; outbound Octokit calls live in ../shared/pull-requests.ts.
 //
@@ -25,6 +29,7 @@ export const channel = createGitHubChannel({
 		if (delivery.name === 'pull_request') {
 			const { action } = delivery.payload;
 			const { repository, pull_request } = delivery.payload;
+			if (pull_request.user?.type === 'Bot' && !REVIEW_BOT_PRS) return; // skip Dependabot/Renovate
 			const owner = repository.owner.login;
 			const repo = repository.name;
 			const ref = { owner, repo, issueNumber: pull_request.number };
