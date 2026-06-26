@@ -95,16 +95,64 @@ export const channel = createGitHubChannel({
 			return;
 		}
 
-		// --- Comment command on a PR: "review" or "full review" ---------------
+		// --- New issue opened -------------------------------------------------------
+		if (delivery.name === 'issues') {
+			const { action } = delivery.payload;
+			const { repository, issue, sender } = delivery.payload;
+			if (action !== 'opened') return;
+			if (isSelf(sender)) return;
+			if (issue.user?.type === 'Bot' && !REVIEW_BOT_PRS) return;
+			const owner = repository.owner.login;
+			const repo = repository.name;
+			await dispatch(issueClassifier, {
+				id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
+				input: {
+					command: 'classify',
+					owner,
+					repo,
+					issue: issue.number,
+					title: issue.title,
+					body: issue.body ?? '',
+					author: sender.login,
+				},
+			});
+			return;
+		}
+
+		// --- Issue or PR comment ----------------------------------------------------
 		if (delivery.name === 'issue_comment' && delivery.payload.action === 'created') {
 			const { repository, issue, comment, sender } = delivery.payload;
-			if (!issue.pull_request) return; // PRs only
-			if (isSelf(sender)) return; // never react to ourselves
+			if (isSelf(sender)) return;
 
+			if (!issue.pull_request) {
+				// Issue comment — /triage command
+				const body = comment.body.trim();
+				if (!body.toLowerCase().startsWith('/triage')) return;
+				const rest = body.slice('/triage'.length).trim().toLowerCase();
+				const directive = rest || undefined;
+				const validDirectives = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'];
+				if (directive && !validDirectives.includes(directive)) return;
+				const owner = repository.owner.login;
+				const repo = repository.name;
+				await dispatch(issueTriager, {
+					id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
+					input: {
+						command: 'triage',
+						owner,
+						repo,
+						issue: issue.number,
+						directive,
+						requester: sender.login,
+					},
+				});
+				return;
+			}
+
+			// PR comment — review commands
 			const normalized = comment.body.trim().toLowerCase().replace(/^\//, '').trim();
 			const command =
 				normalized === 'full review' ? 'full' : normalized === 'review' ? 'incremental' : null;
-			if (!command) return; // non-command conversation comments are ignored
+			if (!command) return;
 
 			const owner = repository.owner.login;
 			const repo = repository.name;
