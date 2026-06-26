@@ -26,5 +26,8 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+
+  // Don't type-check build output or deps.
+  "exclude": ["dist", "node_modules"]
 }

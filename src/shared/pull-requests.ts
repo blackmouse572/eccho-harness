@@ -93,6 +93,16 @@ function reviewMarker(idempotencyKey: string): string {
 	return `<!-- eccho-pr-review key=${idempotencyKey} -->`;
 }
 
+/** Lightweight GitHub reachability + token validity check, for health probes. */
+export async function pingGitHub(): Promise<{ ok: boolean; login?: string; error?: string }> {
+	try {
+		const res = await client.rest.users.getAuthenticated();
+		return { ok: true, login: res.data.login };
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
 export function createPullRequestGateway(ref: PullRequestRef): PullRequestGateway {
 	const { owner, repo, issueNumber: pull_number } = ref;
 
