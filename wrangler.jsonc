@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "eccho-pr-reviewer",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "durable_objects": {
+    "bindings": [{ "class_name": "Sandbox", "name": "Sandbox" }]
+  },
+  "containers": [{ "class_name": "Sandbox", "image": "./Dockerfile" }],
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "FlueRegistry",
+        "FluePrReviewerAgent",
+        "FlueReviewPullRequestWorkflow"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["Sandbox"]
+    }
+  ]
+}

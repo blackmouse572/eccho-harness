@@ -1,0 +1,21 @@
+{
+  "name": "eccho-harness",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@flue/cli": "^1.0.0-beta.5",
+    "@types/bun": "latest",
+    "wrangler": "^4.104.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "^0.11.0",
+    "@flue/github": "^1.0.0-beta.1",
+    "@flue/runtime": "^1.0.0-beta.5",
+    "@octokit/rest": "^22.0.1",
+    "agents": "^0.14.2",
+    "valibot": "^1.4.1"
+  }
+}
