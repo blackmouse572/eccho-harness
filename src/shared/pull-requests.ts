@@ -60,6 +60,10 @@ export interface PullRequestGateway {
 	get(): Promise<PullRequest>;
 	diff(): Promise<string>;
 	rangeDiff(base: string, head: string): Promise<string>;
+	/** List repo file paths at the PR head (optionally filtered by a path prefix). For the domain reviewer. */
+	listTree(prefix?: string): Promise<string[]>;
+	/** Read one repo file at the PR head; null if missing, a directory, binary, or too large. */
+	readFile(path: string): Promise<string | null>;
 	/** Existing review carrying this idempotency key, or null. Lets callers early-exit before expensive work. */
 	findReview(idempotencyKey: string): Promise<ReviewRef | null>;
 	postReview(args: { summary: string; idempotencyKey: string; comments?: InlineComment[] }): Promise<PostReviewResult>;
@@ -77,6 +81,16 @@ function reviewMarker(idempotencyKey: string): string {
 
 export function createPullRequestGateway(ref: PullRequestRef): PullRequestGateway {
 	const { owner, repo, issueNumber: pull_number } = ref;
+
+	// Memoized PR head commit SHA — repo reads resolve against the PR head.
+	let cachedHead: string | undefined;
+	async function headSha(): Promise<string> {
+		if (!cachedHead) {
+			const pr = await client.rest.pulls.get({ owner, repo, pull_number });
+			cachedHead = pr.data.head.sha;
+		}
+		return cachedHead;
+	}
 
 	async function findReviewRef(idempotencyKey: string): Promise<ReviewRef | null> {
 		const marker = reviewMarker(idempotencyKey);
@@ -120,6 +134,28 @@ export function createPullRequestGateway(ref: PullRequestRef): PullRequestGatewa
 				mediaType: { format: 'diff' },
 			});
 			return res.data as unknown as string;
+		},
+
+		async listTree(prefix) {
+			const ref2 = await headSha();
+			const commit = await client.rest.git.getCommit({ owner, repo, commit_sha: ref2 });
+			const tree = await client.rest.git.getTree({ owner, repo, tree_sha: commit.data.tree.sha, recursive: 'true' });
+			let paths = tree.data.tree.filter((t) => t.type === 'blob' && t.path).map((t) => t.path as string);
+			if (prefix) paths = paths.filter((p) => p.startsWith(prefix));
+			return paths;
+		},
+
+		async readFile(path) {
+			const ref2 = await headSha();
+			try {
+				const res = await client.rest.repos.getContent({ owner, repo, path, ref: ref2 });
+				const data = res.data;
+				if (Array.isArray(data) || data.type !== 'file' || typeof data.content !== 'string') return null;
+				return Buffer.from(data.content, 'base64').toString('utf8');
+			} catch (err) {
+				if (err && typeof err === 'object' && 'status' in err && err.status === 404) return null;
+				throw err;
+			}
 		},
 
 		findReview: findReviewRef,

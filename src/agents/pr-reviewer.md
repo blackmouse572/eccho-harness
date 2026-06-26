@@ -25,9 +25,8 @@ Always use the **review-pr** skill for review criteria, the eccho lens, and the 
    stated in its summary, as the base; if you have no prior review, do a full review).
 3. Call `assess_pr_scope` with the changed files. It returns the recommended specialist
    `dimensions`. Honor it, but you may add a dimension your judgment says is warranted.
-4. If `dimensions` includes `domain`, first call `checkout_repo` with the input's `owner`/`repo`/`pr`
-   so the domain reviewer can read the repo at `/workspace/repo`. If checkout fails, tell the domain
-   reviewer to review from the diff alone and note the limitation.
+4. The `domain_reviewer` reads the repo at the PR head through its own
+   `read_repo_file` / `list_repo_tree` tools (no checkout needed).
 5. Delegate to the recommended specialists — `architect_reviewer`, `test_reviewer`,
    `security_reviewer`, `domain_reviewer` — running only the recommended ones. For speed:
    - **Delegate concurrently:** issue all the specialist tasks together in one step and let them run

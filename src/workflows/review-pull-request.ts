@@ -1,10 +1,8 @@
 import { defineAgent, defineWorkflow } from '@flue/runtime';
-import { cloudflareSandbox } from '@flue/runtime/cloudflare';
-import { getSandbox } from '@cloudflare/sandbox';
 import * as v from 'valibot';
 import reviewPr from '../skills/review-pr/SKILL.md' with { type: 'skill' };
-import { checkoutPrHead } from '../shared/checkout.ts';
 import { createPullRequestGateway } from '../shared/pull-requests.ts';
+import { domainRepoTools } from '../shared/repo-tools.ts';
 import { assessScope } from '../shared/scope.ts';
 import {
 	FindingsSchema,
@@ -21,13 +19,9 @@ import {
 // without cross-event memory. Invoke:
 //   flue run review-pull-request --input '{"owner":"blackmouse572","repo":"eccho","pr":123}'
 
-type Env = { Sandbox: Parameters<typeof getSandbox>[0] };
-
-const coordinator = defineAgent<Env>(({ id, env }) => ({
+const coordinator = defineAgent(() => ({
 	model: 'deepseek/deepseek-v4-flash',
 	thinkingLevel: 'medium',
-	sandbox: cloudflareSandbox(getSandbox(env.Sandbox, id)),
-	cwd: '/workspace',
 	skills: [reviewPr],
 	subagents: reviewerProfiles,
 }));
@@ -74,13 +68,9 @@ export default defineWorkflow({
 			return { reviewUrl: existing.url, dimensions, deduped: true };
 		}
 
-		// 3. Checkout for the domain reviewer (container sandbox), if needed.
-		if (dimensions.includes('domain')) {
-			await checkoutPrHead(harness, { owner, repo, pr });
-		}
-
-		// 4. Fan out to the recommended specialists IN PARALLEL — each gets only
+		// 3. Fan out to the recommended specialists IN PARALLEL — each gets only
 		//    its scoped slice of the diff. Separate sessions avoid contention.
+		//    The domain reviewer gets repo-read tools (GitHub API) for this PR.
 		const findings: Array<{ dimension: string } & Findings> = await Promise.all(
 			dimensions.map(async (dimension) => {
 				const session = await harness.session(dimension);
@@ -91,7 +81,11 @@ export default defineWorkflow({
 						prBody: prInfo.body,
 						diff: scopedDiff(dimension, prInfo.changedFiles),
 					}),
-					{ agent: dimensionAgent[dimension], result: FindingsSchema },
+					{
+						agent: dimensionAgent[dimension],
+						result: FindingsSchema,
+						...(dimension === 'domain' ? { tools: domainRepoTools(gw) } : {}),
+					},
 				);
 				return { dimension, ...res.data };
 			}),

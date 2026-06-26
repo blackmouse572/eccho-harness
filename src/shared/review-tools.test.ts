@@ -15,6 +15,8 @@ function fakeGateway() {
 			calls.rangeDiff = { base, head };
 			return 'RANGE';
 		},
+		listTree: async () => [],
+		readFile: async () => null,
 		findReview: async () => null,
 		postReview: async (a) => {
 			calls.postReview = a;

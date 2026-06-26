@@ -15,6 +15,17 @@ mock.module('@octokit/rest', () => ({
 					created.push(p);
 					return { data: { id: 99, html_url: 'http://x/99' } };
 				},
+				get: async () => ({ data: { head: { sha: 'HEADSHA' } } }),
+			},
+			repos: {
+				getContent: async ({ path }: { path: string }) => {
+					if (path === 'CONTEXT.md') {
+						return { data: { type: 'file', content: Buffer.from('hello domain', 'utf8').toString('base64') } };
+					}
+					const e = new Error('Not Found') as Error & { status: number };
+					e.status = 404;
+					throw e;
+				},
 			},
 		};
 		graphql = async () => ({});
@@ -48,4 +59,9 @@ test('findReview returns the matching review or null', async () => {
 	reviews = [{ id: 5, html_url: 'http://x/5', body: '<!-- eccho-pr-review key=k2 -->' }];
 	expect(await gw().findReview('k2')).toEqual({ reviewId: 5, url: 'http://x/5' });
 	expect(await gw().findReview('nope')).toBeNull();
+});
+
+test('readFile decodes a repo file at the PR head, null when missing', async () => {
+	expect(await gw().readFile('CONTEXT.md')).toBe('hello domain');
+	expect(await gw().readFile('nope.md')).toBeNull();
 });

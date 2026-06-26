@@ -1,12 +1,13 @@
 import { defineAgentProfile } from "@flue/runtime";
 import * as v from "valibot";
 import { filesForDimension, type ReviewDimension } from "./scope.ts";
-import type { ChangedFile } from "./pull-requests.ts";
+import type { ChangedFile, PullRequestGateway } from "./pull-requests.ts";
+import { domainRepoTools } from "./repo-tools.ts";
 
 // Specialist reviewers, delegated to by the master agent via session.task().
 // They RETURN structured findings; they do not post to GitHub — the master
-// synthesizes and posts. Subagents share the parent's sandbox, so the domain
-// reviewer can read the repo checkout at /workspace/repo with its file tools.
+// synthesizes and posts. The domain reviewer reads the repo at the PR head
+// through GitHub-API tools (read_repo_file / list_repo_tree) — no checkout.
 
 /** Structured findings every specialist returns. */
 export const FindingsSchema = v.object({
@@ -59,15 +60,33 @@ export const securityReviewer = defineAgentProfile({
     "You review the security of a code change for a multi-tenant platform. Check: authentication/authorization boundaries; input validation and injection (SQL, command, path); secret handling and leakage; SSRF and unbounded effects from user-configured HTTP/MCP tools; deserialization; and cross-tenant (Workspace) data isolation. Rate true risks by severity; do not invent hypotheticals unsupported by the diff. Return structured findings; do not post anywhere.",
 });
 
+const DOMAIN_DESC =
+  "Reviews eccho domain alignment against ADRs/CONTEXT/instructions by reading the repo at the PR head via the GitHub API.";
+const DOMAIN_INSTRUCTIONS =
+  "You review whether a change aligns with eccho's documented domain decisions. Use list_repo_tree and read_repo_file to read the governance docs at the PR head — start with CONTEXT.md, docs/** (especially docs/adr/** ADRs), and .github/instructions/** — then cross-check the change against them and the PR description (the PRD/intent). Flag: contradictions with an ADR or the domain model (Workspace, Chatbot, Account, Conversation, Operator, Guardrail, Escalation, Tool Registry, ContactPoint, ...), missing handling the docs require, and decisions that should have an ADR but don't. Cite the doc path. Return structured findings; do not post anywhere.";
+
+// Base profile (no tools) — used by the workflow, which passes the repo tools
+// per-call via session.task({ tools }).
 export const domainReviewer = defineAgentProfile({
   name: "domain_reviewer",
   model: SPECIALIST_MODEL,
   thinkingLevel: SPECIALIST_THINKING,
-  description:
-    "Reviews eccho domain alignment against PRDs/ADRs/CONTEXT using the repo checkout at /workspace/repo.",
-  instructions:
-    "You review whether a change aligns with eccho's documented domain decisions. The repository is checked out at /workspace/repo — read CONTEXT.md, docs/** (especially any docs/adr/** ADRs), and .github/instructions/** with your file tools, and cross-check the change against them and the PR description (the PRD/intent). Flag: contradictions with an ADR or the domain model (Workspace, Chatbot, Account, Conversation, Operator, Guardrail, Escalation, Tool Registry, ContactPoint,...), missing handling the docs require, and decisions that should have an ADR but don't. Cite the doc path. Return structured findings; do not post anywhere.",
+  description: DOMAIN_DESC,
+  instructions: DOMAIN_INSTRUCTIONS,
 });
+
+// Tool-bearing profile for the master agent, where delegation is model-initiated
+// and per-call tools aren't available — bind the repo tools to the PR's gateway.
+export function makeDomainReviewer(gw: PullRequestGateway) {
+  return defineAgentProfile({
+    name: "domain_reviewer",
+    model: SPECIALIST_MODEL,
+    thinkingLevel: SPECIALIST_THINKING,
+    description: DOMAIN_DESC,
+    instructions: DOMAIN_INSTRUCTIONS,
+    tools: domainRepoTools(gw),
+  });
+}
 
 export const reviewerProfiles = [
   architectReviewer,
@@ -93,7 +112,7 @@ export function buildSpecialistPrompt(args: {
 }): string {
   const repoNote =
     args.dimension === "domain"
-      ? "\nThe full repository is checked out at /workspace/repo — read the governance docs there and cross-check."
+      ? "\nUse your read_repo_file / list_repo_tree tools to read the governance docs (CONTEXT.md, docs/adr/**, .github/instructions/**) at the PR head and cross-check."
       : "";
   return [
     `Review this pull request from your ${args.dimension} perspective.`,
