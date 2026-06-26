@@ -31,6 +31,10 @@
     {
       "tag": "v3",
       "deleted_classes": ["Sandbox"]
+    },
+    {
+      "tag": "v4",
+      "new_sqlite_classes": ["FlueIssueClassifierAgent", "FlueIssueTriagerAgent"]
     }
   ]
 }
