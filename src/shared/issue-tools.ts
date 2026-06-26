@@ -9,7 +9,10 @@ export function createClassifierTools(gw: IssueGateway) {
 			name: 'ensure_triage_labels',
 			description:
 				'Create missing triage labels in this repo (needs-triage, needs-info, ready-for-agent, ready-for-human, difficulty:hard). Call once before adding any labels.',
-			run: () => gw.ensureLabels(MISSING_LABELS),
+			run: async () => {
+				await gw.ensureLabels(MISSING_LABELS);
+				return undefined;
+			},
 		}),
 
 		defineTool({
@@ -18,7 +21,10 @@ export function createClassifierTools(gw: IssueGateway) {
 			input: v.object({
 				names: v.array(v.pipe(v.string(), v.minLength(1)), 'Label names to apply.'),
 			}),
-			run: ({ input }) => gw.addLabels(input.names),
+			run: async ({ input }) => {
+				await gw.addLabels(input.names);
+				return undefined;
+			},
 		}),
 
 		defineTool({
@@ -27,7 +33,10 @@ export function createClassifierTools(gw: IssueGateway) {
 			input: v.object({
 				body: v.pipe(v.string(), v.minLength(1), v.description('Comment body in Markdown.')),
 			}),
-			run: ({ input }) => gw.postComment(input.body),
+			run: async ({ input }) => {
+				await gw.postComment(input.body);
+				return undefined;
+			},
 		}),
 	];
 }
@@ -45,7 +54,10 @@ export function createTriagerTools(gw: IssueGateway) {
 			name: 'ensure_triage_labels',
 			description:
 				'Create missing triage labels (needs-triage, needs-info, ready-for-agent, ready-for-human, difficulty:hard). Call once at the start of triage.',
-			run: () => gw.ensureLabels(MISSING_LABELS),
+			run: async () => {
+				await gw.ensureLabels(MISSING_LABELS);
+				return undefined;
+			},
 		}),
 
 		defineTool({
@@ -54,7 +66,10 @@ export function createTriagerTools(gw: IssueGateway) {
 			input: v.object({
 				names: v.array(v.pipe(v.string(), v.minLength(1)), 'Label names to apply.'),
 			}),
-			run: ({ input }) => gw.addLabels(input.names),
+			run: async ({ input }) => {
+				await gw.addLabels(input.names);
+				return undefined;
+			},
 		}),
 
 		defineTool({
@@ -63,7 +78,10 @@ export function createTriagerTools(gw: IssueGateway) {
 			input: v.object({
 				name: v.pipe(v.string(), v.minLength(1), v.description('Label name to remove.')),
 			}),
-			run: ({ input }) => gw.removeLabel(input.name),
+			run: async ({ input }) => {
+				await gw.removeLabel(input.name);
+				return undefined;
+			},
 		}),
 
 		defineTool({
@@ -72,13 +90,19 @@ export function createTriagerTools(gw: IssueGateway) {
 			input: v.object({
 				body: v.pipe(v.string(), v.minLength(1), v.description('Comment body in Markdown.')),
 			}),
-			run: ({ input }) => gw.postComment(input.body),
+			run: async ({ input }) => {
+				await gw.postComment(input.body);
+				return undefined;
+			},
 		}),
 
 		defineTool({
 			name: 'close_issue',
 			description: 'Close this issue. Use only for wontfix outcomes.',
-			run: () => gw.close(),
+			run: async () => {
+				await gw.close();
+				return undefined;
+			},
 		}),
 
 		defineTool({
