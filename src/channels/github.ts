@@ -3,8 +3,16 @@ import { createGitHubChannel } from '@flue/github';
 import { dispatch } from '@flue/runtime';
 import prReviewer from '../agents/pr-reviewer.ts';
 
+// The bot authenticates with a PAT, so its OWN comments arrive as sender type
+// `User`, not `Bot`. Without this, the bot would react to (and loop on) its own
+// reviews/replies. Set GITHUB_BOT_LOGIN to the PAT account's login to skip them.
+const BOT_LOGIN = process.env.GITHUB_BOT_LOGIN?.toLowerCase();
+function isSelf(sender: { type: string; login: string }): boolean {
+	return sender.type === 'Bot' || (!!BOT_LOGIN && sender.login.toLowerCase() === BOT_LOGIN);
+}
+
 // Verified GitHub webhook ingress. `GITHUB_WEBHOOK_SECRET` authenticates inbound
-// deliveries; outbound Octokit calls live in ../shared/github-tools.ts.
+// deliveries; outbound Octokit calls live in ../shared/pull-requests.ts.
 //
 // Webhook path: /channels/github/webhook
 // Subscribe in GitHub to: "Pull requests", "Issue comments", and
@@ -64,7 +72,7 @@ export const channel = createGitHubChannel({
 		if (delivery.name === 'issue_comment' && delivery.payload.action === 'created') {
 			const { repository, issue, comment, sender } = delivery.payload;
 			if (!issue.pull_request) return; // PRs only
-			if (sender.type === 'Bot') return; // never react to bots (incl. ourselves)
+			if (isSelf(sender)) return; // never react to ourselves
 
 			const normalized = comment.body.trim().toLowerCase().replace(/^\//, '').trim();
 			const command =
@@ -91,7 +99,7 @@ export const channel = createGitHubChannel({
 		// --- User reply inside an inline review thread ------------------------
 		if (delivery.name === 'pull_request_review_comment' && delivery.payload.action === 'created') {
 			const { repository, pull_request, comment, sender } = delivery.payload;
-			if (sender.type === 'Bot') return;
+			if (isSelf(sender)) return;
 			// Only replies within an existing thread — not fresh top-level comments.
 			if (!comment.in_reply_to_id) return;
 

@@ -4,6 +4,15 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Workers Logs — so background agent work is visible (`wrangler tail` / dashboard).
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
+
   // Never rewrite applied migration history. v1 + v2 were deployed (the old
   // container version); v3 retires the now-removed Sandbox container class.
   "migrations": [
