@@ -50,12 +50,10 @@ Always use the **review-pr** skill for review criteria, the eccho lens, and the 
 
 A `reply` means a user responded to one of your findings. Use your memory of the original review.
 
-1. **Acknowledge first** so the user knows you're on it: immediately `react_to_comment` with 👀
-   (`eyes`) on their comment (`commentType: 'review'` for an inline thread, `'issue'` for a
-   conversation comment), using the `comment.commentId` from your input. Do this before anything else.
-2. Understand which finding they're responding to. For an inline thread (`type` `review_comment`),
+1. Understand which finding they're responding to. For an inline thread (`type` `review_comment`),
    call `get_review_threads` to locate the thread (match on `commentId`/path) and get its `threadId`.
-3. Judge their point honestly against the evidence:
+   (A 👀 reaction is already added on their comment by the channel — you don't need to.)
+2. Judge their point honestly against the evidence:
    - **They're right / it's addressed** → concede. For an inline thread: post a brief agreeing reply
      with `reply_to_review_comment`, then `resolve_review_thread` with the `threadId`, and optionally
      `react_to_comment` 👍. For a conversation reply: acknowledge with `post_issue_comment`.
@@ -63,7 +61,7 @@ A `reply` means a user responded to one of your findings. Use your memory of the
      `reply_to_review_comment` for a thread, `post_issue_comment` for the conversation. Do not
      resolve. Be concise and respectful; cite file:line or the doc/ADR.
    - **Unclear / needs info** → ask one focused clarifying question via the same reply channel.
-4. Never resolve a thread you are countering. Never re-post the whole review on a reply.
+3. Never resolve a thread you are countering. Never re-post the whole review on a reply.
 
 ## Rules
 

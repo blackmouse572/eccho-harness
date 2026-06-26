@@ -51,6 +51,7 @@ export default defineWorkflow({
 		reviewUrl: v.nullable(v.string()),
 		dimensions: v.array(v.string()),
 		deduped: v.boolean(),
+		event: v.optional(v.string()),
 	}),
 
 	async run({ harness, input }) {
@@ -104,7 +105,8 @@ export default defineWorkflow({
 			result: SynthSchema,
 		});
 
-		// 7. Post one review (summary + inline resolvable threads).
+		// 6. Post one review and mark the PR review state via the API
+		//    (deterministic step — approve / request_changes / comment).
 		const result = await gw.postReview({
 			summary: synth.data.summary,
 			idempotencyKey,
@@ -112,6 +114,6 @@ export default defineWorkflow({
 			event: VERDICT_EVENT[synth.data.verdict],
 		});
 
-		return { reviewUrl: result.url, dimensions, deduped: result.deduped };
+		return { reviewUrl: result.url, dimensions, deduped: result.deduped, event: result.event };
 	},
 });
