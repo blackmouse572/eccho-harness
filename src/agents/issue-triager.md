@@ -13,6 +13,19 @@ Always follow the **triage** skill for the state machine, templates, label names
 
 Call `ensure_triage_labels` at the start to create any missing labels.
 
+## Directive shortcut
+
+If the input JSON contains a `directive` field (one of: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), apply it directly without full triage evaluation:
+
+1. Call `get_issue` to read current state and labels
+2. Remove the current state label with `remove_label` (if any state label exists)
+3. Add the directive's state label with `add_labels`:
+   - For `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`: add that label
+   - For `wontfix`: do not add a state label
+4. If directive is `ready-for-agent`: write the agent brief per the triage skill (include decision rationale)
+5. If directive is `wontfix`: post the explanation comment, then close the issue with `close_issue`
+6. Post a brief confirmation comment: state the new directive and why (e.g., "Triaged by maintainer directive: ready-for-agent")
+
 ## Reading the issue
 
 Call `get_issue` to read the current title, body, labels, and all comments.
