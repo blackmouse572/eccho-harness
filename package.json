@@ -10,7 +10,7 @@
     "check": "bunx tsc --noEmit && bun test",
     "deploy:dry": "flue build --target cloudflare && wrangler deploy --dry-run --config dist/eccho_pr_reviewer/wrangler.json",
     "deploy": "flue build --target cloudflare && wrangler deploy --config dist/eccho_pr_reviewer/wrangler.json",
-    "deploy:secrets": "wrangler secret put DEEPSEEK_API_KEY --name eccho-pr-reviewer && wrangler secret put GITHUB_TOKEN --name eccho-pr-reviewer && wrangler secret put GITHUB_WEBHOOK_SECRET --name eccho-pr-reviewer && wrangler secret put GITHUB_BOT_LOGIN --name eccho-pr-reviewer",
+    "deploy:secrets": "wrangler secret put DEEPSEEK_API_KEY --name eccho-pr-reviewer && wrangler secret put GITHUB_TOKEN --name eccho-pr-reviewer && wrangler secret put GITHUB_WEBHOOK_SECRET --name eccho-pr-reviewer && wrangler secret put GITHUB_BOT_LOGIN --name eccho-pr-reviewer && wrangler secret put BRAINTRUST_API_KEY --name eccho-pr-reviewer",
     "review": "flue run review-pull-request --target cloudflare --env .dev.vars"
   },
   "devDependencies": {
@@ -26,6 +26,8 @@
     "@flue/runtime": "^1.0.0-beta.5",
     "@octokit/rest": "^22.0.1",
     "agents": "^0.14.2",
+    "braintrust": "3.17.0",
+    "hono": "^4.12.27",
     "valibot": "^1.4.1"
   }
 }
