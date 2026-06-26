@@ -114,5 +114,15 @@ export function createTriagerTools(gw: IssueGateway) {
 			}),
 			run: ({ input }) => gw.readRepoFile(input.path),
 		}),
+
+		defineTool({
+			name: 'list_repo_tree',
+			description:
+				'List file paths in the repository (default branch). Pass an optional prefix to filter (e.g. "docs/adr/"). Use to discover ADR files before reading them.',
+			input: v.object({
+				prefix: v.optional(v.pipe(v.string(), v.description('Path prefix filter, e.g. docs/adr/'))),
+			}),
+			run: ({ input }) => gw.listRepoTree(input?.prefix),
+		}),
 	];
 }

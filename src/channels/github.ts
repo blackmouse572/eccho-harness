@@ -129,7 +129,7 @@ export const channel = createGitHubChannel({
 				const body = comment.body.trim();
 				if (!body.toLowerCase().startsWith('/triage')) return;
 				const rest = body.slice('/triage'.length).trim().toLowerCase();
-				const directive = rest || undefined;
+				const directive = rest.split(/\s+/)[0] || undefined;
 				const validDirectives = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'];
 				if (directive && !validDirectives.includes(directive)) return;
 				const owner = repository.owner.login;

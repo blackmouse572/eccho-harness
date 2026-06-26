@@ -7,13 +7,16 @@ let addedLabels: string[] = [];
 let removedLabel = '';
 let postedComment = '';
 let closed = false;
+let stateReason = '';
 let createdLabels: Array<{ name: string; color: string; description: string }> = [];
+let createLabel422Names = new Set<string>();
 
 mock.module('@octokit/rest', () => ({
 	Octokit: class {
 		paginate = async (method: string) => {
 			if (method === 'listComments') return comments;
 			if (method === 'listLabelsForRepo') return repoLabels;
+			if (method === 'listCommits') return [{ sha: 'abc' }];
 			return [];
 		};
 		rest = {
@@ -31,8 +34,20 @@ mock.module('@octokit/rest', () => ({
 					removedLabel = p.name;
 				},
 				createComment: async (p: { body: string }) => { postedComment = p.body; },
-				update: async (p: { state: string }) => { if (p.state === 'closed') closed = true; },
-				createLabel: async (p: { name: string; color: string; description: string }) => { createdLabels.push(p); },
+				update: async (p: { state: string; state_reason?: string }) => {
+					if (p.state === 'closed') {
+						closed = true;
+						stateReason = p.state_reason ?? '';
+					}
+				},
+				createLabel: async (p: { name: string; color: string; description: string }) => {
+					if (createLabel422Names.has(p.name)) {
+						const e = new Error('Already exists') as Error & { status: number };
+						e.status = 422;
+						throw e;
+					}
+					createdLabels.push(p);
+				},
 			},
 			repos: {
 				getContent: async (p: { path: string }) => {
@@ -43,6 +58,18 @@ mock.module('@octokit/rest', () => ({
 					e.status = 404;
 					throw e;
 				},
+				listCommits: 'listCommits',
+			},
+			git: {
+				getCommit: async (_p: { commit_sha: string }) => ({ data: { tree: { sha: 'treeSha' } } }),
+				getTree: async (_p: { tree_sha: string }) => ({
+					data: {
+						tree: [
+							{ type: 'blob', path: 'docs/adr/0001.md' },
+							{ type: 'blob', path: 'src/foo.ts' },
+						],
+					},
+				}),
 			},
 		};
 	},
@@ -56,7 +83,9 @@ beforeEach(() => {
 	removedLabel = '';
 	postedComment = '';
 	closed = false;
+	stateReason = '';
 	createdLabels = [];
+	createLabel422Names = new Set();
 	repoLabels = [{ name: 'bug' }];
 	comments = [];
 });
@@ -90,9 +119,10 @@ test('postComment posts to the issue', async () => {
 	expect(postedComment).toBe('hello world');
 });
 
-test('close sets state to closed', async () => {
+test('close sets state to closed with state_reason not_planned', async () => {
 	await gw().close();
 	expect(closed).toBe(true);
+	expect(stateReason).toBe('not_planned');
 });
 
 test('ensureLabels creates only labels not already in the repo', async () => {
@@ -118,4 +148,18 @@ test('MISSING_LABELS contains all five required labels', () => {
 	expect(names).toContain('ready-for-agent');
 	expect(names).toContain('ready-for-human');
 	expect(names).toContain('difficulty:hard');
+});
+
+test('listRepoTree returns filtered paths', async () => {
+	const result = await gw().listRepoTree('docs/adr/');
+	expect(result).toEqual(['docs/adr/0001.md']);
+});
+
+test('ensureLabels ignores 422 (label already exists race)', async () => {
+	repoLabels = [];
+	createLabel422Names = new Set(['needs-triage']);
+	await expect(gw().ensureLabels(MISSING_LABELS)).resolves.toBeUndefined();
+	const created = createdLabels.map((l) => l.name);
+	expect(created).not.toContain('needs-triage');
+	expect(created).toContain('needs-info');
 });

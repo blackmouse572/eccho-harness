@@ -30,6 +30,7 @@ export interface IssueGateway {
 	close(): Promise<void>;
 	ensureLabels(defs: LabelDef[]): Promise<void>;
 	readRepoFile(path: string): Promise<string | null>;
+	listRepoTree(prefix?: string): Promise<string[]>;
 }
 
 export const MISSING_LABELS: LabelDef[] = [
@@ -83,7 +84,7 @@ export function createIssueGateway(ref: IssueRef): IssueGateway {
 		},
 
 		async close() {
-			await client.rest.issues.update({ owner, repo, issue_number, state: 'closed' });
+			await client.rest.issues.update({ owner, repo, issue_number, state: 'closed', state_reason: 'not_planned' });
 		},
 
 		async ensureLabels(defs) {
@@ -99,9 +100,23 @@ export function createIssueGateway(ref: IssueRef): IssueGateway {
 							name: d.name,
 							color: d.color,
 							description: d.description ?? '',
+						}).catch((err: unknown) => {
+							if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 422) return;
+							throw err;
 						}),
 					),
 			);
+		},
+
+		async listRepoTree(prefix) {
+			const commits = await client.paginate(client.rest.repos.listCommits, { owner, repo, per_page: 1 });
+			const headSha = (commits[0] as { sha?: string })?.sha;
+			if (!headSha) return [];
+			const commit = await client.rest.git.getCommit({ owner, repo, commit_sha: headSha });
+			const tree = await client.rest.git.getTree({ owner, repo, tree_sha: commit.data.tree.sha, recursive: 'true' });
+			let paths = tree.data.tree.filter((t) => t.type === 'blob' && t.path).map((t) => t.path as string);
+			if (prefix) paths = paths.filter((p) => p.startsWith(prefix));
+			return paths;
 		},
 
 		async readRepoFile(path) {

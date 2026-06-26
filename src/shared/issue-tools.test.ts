@@ -21,6 +21,7 @@ function fakeGw(overrides: Partial<IssueGateway> = {}): IssueGateway {
 		close: async () => {},
 		ensureLabels: async () => {},
 		readRepoFile: async () => null,
+		listRepoTree: async () => [],
 		...overrides,
 	};
 }
@@ -53,7 +54,7 @@ test('classifier post_comment delegates to gw.postComment', async () => {
 	expect(posted).toBe('hello');
 });
 
-test('createTriagerTools returns get_issue, add_labels, remove_label, post_comment, close_issue, read_repo_file, ensure_triage_labels', () => {
+test('createTriagerTools returns get_issue, add_labels, remove_label, post_comment, close_issue, read_repo_file, ensure_triage_labels, list_repo_tree', () => {
 	const tools = createTriagerTools(fakeGw()) as Tool[];
 	const names = tools.map((t) => t.name);
 	expect(names).toContain('get_issue');
@@ -63,6 +64,7 @@ test('createTriagerTools returns get_issue, add_labels, remove_label, post_comme
 	expect(names).toContain('close_issue');
 	expect(names).toContain('read_repo_file');
 	expect(names).toContain('ensure_triage_labels');
+	expect(names).toContain('list_repo_tree');
 });
 
 test('triager get_issue returns the issue', async () => {
@@ -96,4 +98,19 @@ test('triager read_repo_file delegates to gw.readRepoFile', async () => {
 	const tool = tools.find((t) => t.name === 'read_repo_file')!;
 	const result = await tool.run({ input: { path: 'CONTEXT.md' } });
 	expect(result).toBe('content of CONTEXT.md');
+});
+
+test('triager list_repo_tree delegates to gw.listRepoTree', async () => {
+	const captured: { prefix: string | undefined } = { prefix: undefined };
+	const gw = fakeGw({
+		listRepoTree: async (prefix) => {
+			captured.prefix = prefix;
+			return ['docs/adr/0001.md'];
+		},
+	});
+	const tools = createTriagerTools(gw) as Tool[];
+	const tool = tools.find((t) => t.name === 'list_repo_tree')!;
+	const result = await tool.run({ input: { prefix: 'docs/adr/' } });
+	expect(captured.prefix).toBe('docs/adr/');
+	expect(result).toEqual(['docs/adr/0001.md']);
 });
