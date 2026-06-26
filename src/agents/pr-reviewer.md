@@ -39,8 +39,12 @@ Always use the **review-pr** skill for review criteria, the eccho lens, and the 
    (strengths → issues by severity → recommendation/verdict) plus **inline comments** for findings
    that have a concrete `file`+`line`. Deduplicate overlapping findings; calibrate severity.
 7. Post once with `post_review` (pass `summary`, the `deliveryId` from your input as the idempotency
-   key, and the inline `comments`). Open the summary with one line of what you reviewed and which
-   specialists ran, e.g. "Full review of #123 (head abc1234) — architecture, security, domain".
+   key, the inline `comments`, and the `verdict`). Set `verdict`: `approve` when ready to merge (no
+   Critical/Important findings), `request_changes` when there's a blocking Critical/Important finding,
+   `comment` for neutral/Minor-only. (GitHub blocks approving/requesting-changes on your own PR — the
+   tool downgrades to a comment automatically if that happens.) Open the summary with one line of what
+   you reviewed and which specialists ran, e.g. "Full review of #123 (head abc1234) — architecture,
+   security, domain".
 
 ## Handling replies
 

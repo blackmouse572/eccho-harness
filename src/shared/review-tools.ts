@@ -1,7 +1,16 @@
 import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
-import type { PullRequestGateway } from './pull-requests.ts';
+import type { PullRequestGateway, ReviewEvent } from './pull-requests.ts';
 import { scopedDiff } from './reviewers.ts';
+
+export type Verdict = 'approve' | 'request_changes' | 'comment';
+
+// Map the model-facing verdict to a GitHub review state.
+export const VERDICT_EVENT: Record<Verdict, ReviewEvent> = {
+	approve: 'APPROVE',
+	request_changes: 'REQUEST_CHANGES',
+	comment: 'COMMENT',
+};
 
 // Model-facing tools. Each is a thin adapter over the PullRequestGateway — the
 // model contract (names, descriptions, schemas) lives here; all GitHub behavior
@@ -46,10 +55,11 @@ export function createReviewTools(gw: PullRequestGateway) {
 		defineTool({
 			name: 'post_review',
 			description:
-				'Post the finished review as a pull-request review: a Markdown `summary` plus optional `comments` anchored to file lines (each opens a resolvable thread). Call once per review. Pass `deliveryId` from your input as the idempotency key; a retried or redelivered webhook will not post twice. Only attach inline comments on lines that appear in the diff you reviewed.',
+				'Post the finished review as a pull-request review: a Markdown `summary` plus optional `comments` anchored to file lines (each opens a resolvable thread). Set `verdict` to leave the review state: `approve` when ready to merge, `request_changes` when there are blocking (Critical/Important) issues, `comment` for neutral/minor-only. Call once per review. Pass `deliveryId` from your input as the idempotency key; a retried or redelivered webhook will not post twice. Only attach inline comments on lines that appear in the diff you reviewed.',
 			input: v.object({
 				summary: v.pipe(v.string(), v.minLength(1), v.description('The review summary in Markdown.')),
 				deliveryId: v.pipe(v.string(), v.minLength(1), v.description('The `deliveryId` from your dispatched input. Used as the idempotency key.')),
+				verdict: v.optional(v.picklist(['approve', 'request_changes', 'comment'])),
 				comments: v.optional(
 					v.array(
 						v.object({
@@ -61,7 +71,13 @@ export function createReviewTools(gw: PullRequestGateway) {
 					),
 				),
 			}),
-			run: ({ input }) => gw.postReview({ summary: input.summary, idempotencyKey: input.deliveryId, comments: input.comments }),
+			run: ({ input }) =>
+				gw.postReview({
+					summary: input.summary,
+					idempotencyKey: input.deliveryId,
+					comments: input.comments,
+					event: VERDICT_EVENT[input.verdict ?? 'comment'],
+				}),
 		}),
 
 		defineTool({

@@ -20,7 +20,7 @@ function fakeGateway() {
 		findReview: async () => null,
 		postReview: async (a) => {
 			calls.postReview = a;
-			return { reviewId: 7, url: 'http://x/7', deduped: false };
+			return { reviewId: 7, url: 'http://x/7', deduped: false, event: a.event ?? 'COMMENT' };
 		},
 		postComment: async (body) => {
 			calls.postComment = body;

@@ -52,7 +52,15 @@ export type ReviewThread = {
 
 export type CommentRef = { commentId: number; url: string };
 export type ReviewRef = { reviewId: number; url: string | null };
-export type PostReviewResult = ReviewRef & { deduped: boolean };
+/** GitHub pull-request review state. */
+export type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+export type PostReviewResult = ReviewRef & {
+	deduped: boolean;
+	/** The event actually used (may differ from requested — see `downgraded`). */
+	event: ReviewEvent;
+	/** True when APPROVE/REQUEST_CHANGES was downgraded to COMMENT (e.g. reviewing your own PR). */
+	downgraded?: boolean;
+};
 export type Reaction = '+1' | '-1' | 'laugh' | 'confused' | 'heart' | 'hooray' | 'rocket' | 'eyes';
 
 /** Domain-shaped GitHub PR operations. The interface is the test surface — fake it with mock.module. */
@@ -66,7 +74,13 @@ export interface PullRequestGateway {
 	readFile(path: string): Promise<string | null>;
 	/** Existing review carrying this idempotency key, or null. Lets callers early-exit before expensive work. */
 	findReview(idempotencyKey: string): Promise<ReviewRef | null>;
-	postReview(args: { summary: string; idempotencyKey: string; comments?: InlineComment[] }): Promise<PostReviewResult>;
+	postReview(args: {
+		summary: string;
+		idempotencyKey: string;
+		comments?: InlineComment[];
+		/** Review state to leave: APPROVE / REQUEST_CHANGES / COMMENT (default COMMENT). */
+		event?: ReviewEvent;
+	}): Promise<PostReviewResult>;
 	postComment(body: string): Promise<CommentRef>;
 	replyToThread(commentId: number, body: string): Promise<CommentRef>;
 	listThreads(): Promise<ReviewThread[]>;
@@ -160,19 +174,30 @@ export function createPullRequestGateway(ref: PullRequestRef): PullRequestGatewa
 
 		findReview: findReviewRef,
 
-		async postReview({ summary, idempotencyKey, comments }) {
+		async postReview({ summary, idempotencyKey, comments, event }) {
+			const desired: ReviewEvent = event ?? 'COMMENT';
 			const existing = await findReviewRef(idempotencyKey);
-			if (existing) return { ...existing, deduped: true };
+			if (existing) return { ...existing, deduped: true, event: desired };
 
-			const res = await client.rest.pulls.createReview({
+			const params = {
 				owner,
 				repo,
 				pull_number,
-				event: 'COMMENT',
 				body: `${summary}\n\n${reviewMarker(idempotencyKey)}`,
 				comments: comments?.map((c) => ({ path: c.path, line: c.line, side: c.side ?? 'RIGHT', body: c.body })),
-			});
-			return { reviewId: res.data.id, url: res.data.html_url ?? null, deduped: false };
+			};
+			try {
+				const res = await client.rest.pulls.createReview({ ...params, event: desired });
+				return { reviewId: res.data.id, url: res.data.html_url ?? null, deduped: false, event: desired };
+			} catch (err) {
+				// You can't APPROVE / REQUEST_CHANGES your own PR (422). Downgrade to a COMMENT review.
+				const status = err && typeof err === 'object' && 'status' in err ? err.status : undefined;
+				if (desired !== 'COMMENT' && status === 422) {
+					const res = await client.rest.pulls.createReview({ ...params, event: 'COMMENT' });
+					return { reviewId: res.data.id, url: res.data.html_url ?? null, deduped: false, event: 'COMMENT', downgraded: true };
+				}
+				throw err;
+			}
 		},
 
 		async postComment(body) {

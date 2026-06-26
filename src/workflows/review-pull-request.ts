@@ -3,6 +3,7 @@ import * as v from 'valibot';
 import reviewPr from '../skills/review-pr/SKILL.md' with { type: 'skill' };
 import { createPullRequestGateway } from '../shared/pull-requests.ts';
 import { domainRepoTools } from '../shared/repo-tools.ts';
+import { VERDICT_EVENT } from '../shared/review-tools.ts';
 import { assessScope } from '../shared/scope.ts';
 import {
 	FindingsSchema,
@@ -28,6 +29,7 @@ const coordinator = defineAgent(() => ({
 
 const SynthSchema = v.object({
 	summary: v.string(),
+	verdict: v.picklist(['approve', 'request_changes', 'comment']),
 	comments: v.array(
 		v.object({
 			path: v.string(),
@@ -107,6 +109,7 @@ export default defineWorkflow({
 			summary: synth.data.summary,
 			idempotencyKey,
 			comments: synth.data.comments,
+			event: VERDICT_EVENT[synth.data.verdict],
 		});
 
 		return { reviewUrl: result.url, dimensions, deduped: result.deduped };

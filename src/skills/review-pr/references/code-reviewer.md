@@ -80,8 +80,14 @@ Structure the summary like this:
  Put the detailed explanation and any `suggestion` block in the inline comment at that line.]
 
 > [!NOTE]
-> **Verdict:** Yes | No | With fixes — [1-2 sentence technical assessment]
+> **Verdict:** ✅ Approve | 🔄 Request changes | 💬 Comment — [1-2 sentence technical assessment]
 ```
+
+Set the review state via the `verdict` you pass when posting:
+
+- **`approve`** — ready to merge: no Critical and no Important findings.
+- **`request_changes`** — there is at least one Critical or Important finding (blocking).
+- **`comment`** — neutral or Minor-only; you don't want to block but have notes.
 
 For each finding, always give: the priority badge, a `file:line` reference, what's wrong, why it
 matters, and how to fix (a `suggestion` block when it fits the commented lines).
