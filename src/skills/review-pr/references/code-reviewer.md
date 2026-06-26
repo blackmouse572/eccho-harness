@@ -57,36 +57,34 @@ themselves rather than the implementation, say so.
 
 ## Output format
 
-Post the review using exactly this structure:
+Render in GitHub-Flavored Markdown with priority badges and emoji — see the **Formatting (GitHub)**
+section of `SKILL.md` for the badge URLs, emoji legend, alerts, collapsible sections, and inline
+`suggestion` blocks. Severity maps to a badge: Critical → high, Important → medium, Minor → low.
 
-### Strengths
-[What's well done? Be specific.]
+Structure the summary like this:
 
-### Issues
+```md
+## 🤖 Review of #<n> — <full|incremental> · head `<sha>` · <dimensions>
 
-#### Critical (Must Fix)
-[Bugs, security issues, data-loss risks, broken functionality]
+| Priority | Count |
+| --- | --- |
+| ![high](https://www.gstatic.com/codereviewagent/high-priority.svg) Critical | 1 |
+| ![medium](https://www.gstatic.com/codereviewagent/medium-priority.svg) Important | 2 |
+| ![low](https://www.gstatic.com/codereviewagent/low-priority.svg) Minor | 3 |
 
-#### Important (Should Fix)
-[Architecture problems, missing features, poor error handling, test gaps]
+### ✅ Strengths
+- [What's well done? Be specific, with `file:line`.]
 
-#### Minor (Nice to Have)
-[Code style, optimization opportunities, documentation polish]
+### Findings
+[Each finding on its own line: badge + emoji + bold title + `file:line` + why it matters.
+ Put the detailed explanation and any `suggestion` block in the inline comment at that line.]
 
-For each issue:
-- `file:line` reference
-- What's wrong
-- Why it matters
-- How to fix (if not obvious)
+> [!NOTE]
+> **Verdict:** Yes | No | With fixes — [1-2 sentence technical assessment]
+```
 
-### Recommendations
-[Improvements for code quality, architecture, or process]
-
-### Assessment
-
-**Ready to merge?** [Yes | No | With fixes]
-
-**Reasoning:** [1-2 sentence technical assessment]
+For each finding, always give: the priority badge, a `file:line` reference, what's wrong, why it
+matters, and how to fix (a `suggestion` block when it fits the commented lines).
 
 ## Critical rules
 
