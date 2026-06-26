@@ -4,6 +4,8 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Never rewrite applied migration history. v1 + v2 were deployed (the old
+  // container version); v3 retires the now-removed Sandbox container class.
   "migrations": [
     {
       "tag": "v1",
@@ -12,6 +14,14 @@
         "FluePrReviewerAgent",
         "FlueReviewPullRequestWorkflow"
       ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["Sandbox"]
+    },
+    {
+      "tag": "v3",
+      "deleted_classes": ["Sandbox"]
     }
   ]
 }
