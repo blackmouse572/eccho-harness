@@ -35,6 +35,10 @@
     {
       "tag": "v4",
       "new_sqlite_classes": ["FlueIssueClassifierAgent", "FlueIssueTriagerAgent"]
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["FlueTriageBacklogWorkflow"]
     }
   ]
 }

@@ -41,6 +41,18 @@ export const MISSING_LABELS: LabelDef[] = [
 	{ name: 'difficulty:hard', color: 'EF4444', description: 'Significant effort required' },
 ];
 
+/** List open issue numbers (excluding pull requests) — for backfilling triage over existing issues. */
+export async function listOpenIssues(owner: string, repo: string): Promise<Array<{ number: number; title: string }>> {
+	const issues = await client.paginate(client.rest.issues.listForRepo, {
+		owner,
+		repo,
+		state: 'open',
+		per_page: 100,
+	});
+	// The issues API returns PRs too; drop anything carrying a pull_request ref.
+	return issues.filter((i) => !i.pull_request).map((i) => ({ number: i.number, title: i.title }));
+}
+
 export function createIssueGateway(ref: IssueRef): IssueGateway {
 	const { owner, repo, issueNumber: issue_number } = ref;
 
