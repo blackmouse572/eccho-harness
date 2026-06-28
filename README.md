@@ -17,10 +17,10 @@ Post a comment on any pull request:
 
 | Comment | Action |
 |---|---|
-| `review` or `/review` | Incremental review (changes since last review) |
-| `full review` or `/full review` | Full review of all PR changes |
+| `/review` | Incremental review (changes since last review) |
+| `/full-review` | Full review of all PR changes |
 
-Replies to inline review thread comments are automatically routed back to the reviewer.
+The bot reacts 👀 to acknowledge it received the command. Replies to inline review thread comments are automatically routed back to the reviewer.
 
 ### Issue Triage
 
@@ -40,7 +40,7 @@ Post a comment on any issue:
 | Event | Action |
 |---|---|
 | PR opened / reopened | Full review |
-| PR new commits pushed | Incremental review |
+| PR new commits pushed | Posts a comment with available review commands |
 | Issue opened | Classify issue |
 
 ## Webhook Setup

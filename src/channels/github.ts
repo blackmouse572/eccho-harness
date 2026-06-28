@@ -72,24 +72,9 @@ export const channel = createGitHubChannel({
 						reason: `Pull request ${action}.`,
 					},
 				});
-				return;
-			}
-
-			if (action === 'synchronize') {
-				await dispatch(prReviewer, {
-					id,
-					input: {
-						type: 'github.pull_request.review',
-						command: 'incremental',
-						deliveryId: delivery.deliveryId,
-						owner,
-						repo,
-						pr: pull_request.number,
-						before: delivery.payload.before,
-						after: delivery.payload.after,
-						reason: 'New commits pushed to the pull request.',
-					},
-				});
+				await createPullRequestGateway({ owner, repo, issueNumber: pull_request.number })
+					.postComment('> Comment `/review` for an incremental review or `/full-review` for a full review.')
+					.catch(() => {});
 				return;
 			}
 			return;
@@ -151,7 +136,7 @@ export const channel = createGitHubChannel({
 			// PR comment — review commands
 			const normalized = comment.body.trim().toLowerCase().replace(/^\//, '').trim();
 			const command =
-				normalized === 'full review' ? 'full' : normalized === 'review' ? 'incremental' : null;
+				normalized === 'full-review' ? 'full' : normalized === 'review' ? 'incremental' : null;
 			if (!command) return;
 
 			const owner = repository.owner.login;
@@ -166,7 +151,7 @@ export const channel = createGitHubChannel({
 					owner,
 					repo,
 					pr: issue.number,
-					reason: `"${normalized}" command from @${sender.login}.`,
+					reason: `"/${normalized}" command from @${sender.login}.`,
 				},
 			});
 			return;
