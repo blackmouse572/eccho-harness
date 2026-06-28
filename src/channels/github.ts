@@ -57,7 +57,8 @@ export const channel = createGitHubChannel({
 			const ref = { owner, repo, issueNumber: pull_request.number };
 			const id = channel.conversationKey(ref);
 
-			if (action === 'opened' || action === 'reopened') {
+			if (action === 'opened' || action === 'reopened' || action === 'ready_for_review') {
+				if (pull_request.draft) return; // skip draft PRs
 				await dispatch(prReviewer, {
 					id,
 					input: {
