@@ -73,6 +73,9 @@ export const channel = createGitHubChannel({
 						reason: `Pull request ${action}.`,
 					},
 				});
+				await createPullRequestGateway({ owner, repo, issueNumber: pull_request.number })
+					.postComment('> Comment `/review` for an incremental review or `/full-review` for a full review.')
+					.catch(() => {});
 				return;
 			}
 
