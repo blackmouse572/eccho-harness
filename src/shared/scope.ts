@@ -98,7 +98,7 @@ export function assessScope(files: ChangedFile[]): ScopeAssessment {
 		dimensions.push('security');
 		reasons.push(anySensitive ? 'security-sensitive paths touched' : 'large source change');
 	}
-	if (anyAdr || (anySource && totalChanges >= 160)) {
+	if (anyAdr || (anySource && totalChanges >= 80)) {
 		dimensions.push('domain');
 		reasons.push(anyAdr ? 'ADR/CONTEXT touched' : 'meaningful behavior change');
 	}
