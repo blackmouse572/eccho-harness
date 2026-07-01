@@ -155,7 +155,7 @@ export const channel = createGitHubChannel({
 			// PR comment — review commands
 			const normalized = comment.body.trim().toLowerCase().replace(/^\//, '').trim();
 			const command =
-				normalized === 'full review' ? 'full' : normalized === 'review' ? 'incremental' : null;
+				normalized === 'full-review' ? 'full' : normalized === 'review' ? 'incremental' : null;
 			if (!command) return;
 
 			const owner = repository.owner.login;
@@ -170,7 +170,7 @@ export const channel = createGitHubChannel({
 					owner,
 					repo,
 					pr: issue.number,
-					reason: `"${normalized}" command from @${sender.login}.`,
+					reason: `"/${normalized}" command from @${sender.login}.`,
 				},
 			});
 			return;
