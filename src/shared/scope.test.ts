@@ -39,10 +39,15 @@ test('an ADR change pulls in domain', () => {
 	expect(s.dimensions).toContain('domain');
 });
 
+test('source-only change of 200 lines does not get domain', () => {
+	const s = assessScope([{ filename: 'src/foo.ts', additions: 150, deletions: 50, status: 'modified' }]);
+	expect(s.dimensions).not.toContain('domain');
+});
+
 test('a large source change pulls in all four dimensions', () => {
 	const s = assessScope([{ filename: 'src/big.ts', additions: 500, deletions: 200, status: 'modified' }]);
 	expect(s.size).toBe('large');
-	expect(new Set(s.dimensions)).toEqual(new Set(['architecture', 'testing', 'security', 'domain']));
+	expect(new Set(s.dimensions)).toEqual(new Set(['architecture', 'testing', 'security']));
 });
 
 test('filesForDimension scopes each reviewer to its relevant files', () => {
