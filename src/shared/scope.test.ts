@@ -7,8 +7,14 @@ test('docs-only change recommends no specialists', () => {
 	expect(s.dimensions).toEqual([]);
 });
 
-test('small source change pulls in architecture + testing only', () => {
+test('tiny source change (<100 lines) gets no specialists', () => {
 	const s = assessScope([{ filename: 'src/foo.ts', additions: 60, deletions: 10, status: 'modified' }]);
+	expect(s.size).toBe('tiny');
+	expect(s.dimensions).toEqual([]);
+});
+
+test('source change of exactly 100 lines is classified small with architecture', () => {
+	const s = assessScope([{ filename: 'src/foo.ts', additions: 60, deletions: 40, status: 'modified' }]);
 	expect(s.size).toBe('small');
 	expect(s.dimensions).toContain('architecture');
 	expect(s.dimensions).toContain('testing');
