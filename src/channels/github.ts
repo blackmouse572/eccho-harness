@@ -47,18 +47,30 @@ export const channel = createGitHubChannel({
 	webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
 
 	async webhook({ delivery }): Promise<undefined> {
+		console.log(`[webhook] ${delivery.name} delivery=${delivery.deliveryId}`);
+
 		// --- New / reopened PR, or new commits pushed to a PR -----------------
 		if (delivery.name === 'pull_request') {
 			const { action } = delivery.payload;
 			const { repository, pull_request } = delivery.payload;
-			if (pull_request.user?.type === 'Bot' && !REVIEW_BOT_PRS) return; // skip Dependabot/Renovate
+			const pr = `${repository.owner.login}/${repository.name}#${pull_request.number}`;
+
+			if (pull_request.user?.type === 'Bot' && !REVIEW_BOT_PRS) {
+				console.log(`[pull_request] skip bot PR ${pr} action=${action}`);
+				return;
+			}
+
 			const owner = repository.owner.login;
 			const repo = repository.name;
 			const ref = { owner, repo, issueNumber: pull_request.number };
 			const id = channel.conversationKey(ref);
 
 			if (action === 'opened' || action === 'reopened' || action === 'ready_for_review') {
-				if (pull_request.draft) return; // skip draft PRs
+				if (pull_request.draft) {
+					console.log(`[pull_request] skip draft ${pr} action=${action}`);
+					return;
+				}
+				console.log(`[pull_request] dispatch full review ${pr} action=${action} head=${pull_request.head.sha.slice(0, 7)}`);
 				await dispatch(prReviewer, {
 					id,
 					input: {
@@ -75,11 +87,12 @@ export const channel = createGitHubChannel({
 				});
 				await createPullRequestGateway({ owner, repo, issueNumber: pull_request.number })
 					.postComment('> Comment `/review` for an incremental review or `/full-review` for a full review.')
-					.catch(() => {});
+					.catch((err) => console.warn(`[pull_request] postComment failed ${pr}`, err));
 				return;
 			}
 
 			if (action === 'synchronize') {
+				console.log(`[pull_request] dispatch incremental review ${pr} before=${String(delivery.payload.before).slice(0, 7)} after=${String(delivery.payload.after).slice(0, 7)}`);
 				await dispatch(prReviewer, {
 					id,
 					input: {
@@ -96,6 +109,8 @@ export const channel = createGitHubChannel({
 				});
 				return;
 			}
+
+			console.log(`[pull_request] unhandled action=${action} ${pr}`);
 			return;
 		}
 
@@ -103,11 +118,21 @@ export const channel = createGitHubChannel({
 		if (delivery.name === 'issues') {
 			const { action } = delivery.payload;
 			const { repository, issue, sender } = delivery.payload;
+			const issueRef = `${repository.owner.login}/${repository.name}#${issue.number}`;
+
 			if (action !== 'opened') return;
-			if (isSelf(sender)) return;
-			if (issue.user?.type === 'Bot' && !REVIEW_BOT_PRS) return;
+			if (isSelf(sender)) {
+				console.log(`[issues] skip self sender=${sender.login} ${issueRef}`);
+				return;
+			}
+			if (issue.user?.type === 'Bot' && !REVIEW_BOT_PRS) {
+				console.log(`[issues] skip bot issue ${issueRef}`);
+				return;
+			}
+
 			const owner = repository.owner.login;
 			const repo = repository.name;
+			console.log(`[issues] dispatch classify ${issueRef} author=${sender.login}`);
 			await dispatch(issueClassifier, {
 				id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
 				input: {
@@ -126,7 +151,12 @@ export const channel = createGitHubChannel({
 		// --- Issue or PR comment ----------------------------------------------------
 		if (delivery.name === 'issue_comment' && delivery.payload.action === 'created') {
 			const { repository, issue, comment, sender } = delivery.payload;
-			if (isSelf(sender)) return;
+			const ref = `${repository.owner.login}/${repository.name}#${issue.number}`;
+
+			if (isSelf(sender)) {
+				console.log(`[issue_comment] skip self sender=${sender.login} ${ref}`);
+				return;
+			}
 
 			if (!issue.pull_request) {
 				// Issue comment — /triage command
@@ -135,9 +165,13 @@ export const channel = createGitHubChannel({
 				const rest = body.slice('/triage'.length).trim().toLowerCase();
 				const directive = rest.split(/\s+/)[0] || undefined;
 				const validDirectives = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'];
-				if (directive && !validDirectives.includes(directive)) return;
+				if (directive && !validDirectives.includes(directive)) {
+					console.log(`[issue_comment] unknown triage directive="${directive}" ${ref}`);
+					return;
+				}
 				const owner = repository.owner.login;
 				const repo = repository.name;
+				console.log(`[issue_comment] dispatch triage ${ref} directive=${directive ?? 'auto'} requester=${sender.login}`);
 				await dispatch(issueTriager, {
 					id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
 					input: {
@@ -156,10 +190,14 @@ export const channel = createGitHubChannel({
 			const normalized = comment.body.trim().toLowerCase().replace(/^\//, '').trim();
 			const command =
 				normalized === 'full-review' ? 'full' : normalized === 'review' ? 'incremental' : null;
-			if (!command) return;
+			if (!command) {
+				console.log(`[issue_comment] unrecognised command="${normalized}" ${ref} sender=${sender.login}`);
+				return;
+			}
 
 			const owner = repository.owner.login;
 			const repo = repository.name;
+			console.log(`[issue_comment] dispatch ${command} review ${ref} sender=${sender.login}`);
 			await ackProcessing({ owner, repo, pr: issue.number }, comment.id, 'issue');
 			await dispatch(prReviewer, {
 				id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
@@ -179,12 +217,20 @@ export const channel = createGitHubChannel({
 		// --- User reply inside an inline review thread ------------------------
 		if (delivery.name === 'pull_request_review_comment' && delivery.payload.action === 'created') {
 			const { repository, pull_request, comment, sender } = delivery.payload;
-			if (isSelf(sender)) return;
-			// Only replies within an existing thread — not fresh top-level comments.
-			if (!comment.in_reply_to_id) return;
+			const pr = `${repository.owner.login}/${repository.name}#${pull_request.number}`;
+
+			if (isSelf(sender)) {
+				console.log(`[review_comment] skip self sender=${sender.login} ${pr}`);
+				return;
+			}
+			if (!comment.in_reply_to_id) {
+				console.log(`[review_comment] skip top-level comment ${pr} sender=${sender.login}`);
+				return;
+			}
 
 			const owner = repository.owner.login;
 			const repo = repository.name;
+			console.log(`[review_comment] dispatch reply ${pr} sender=${sender.login} comment=${comment.id}`);
 			await ackProcessing({ owner, repo, pr: pull_request.number }, comment.id, 'review');
 			await dispatch(prReviewer, {
 				id: channel.conversationKey({ owner, repo, issueNumber: pull_request.number }),
@@ -208,6 +254,6 @@ export const channel = createGitHubChannel({
 			return;
 		}
 
-		// Any other verified delivery: acknowledged with an empty success.
+		console.log(`[webhook] unhandled event=${delivery.name}`);
 	},
 });
