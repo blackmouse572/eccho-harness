@@ -23,8 +23,8 @@ Always use the **review-pr** skill for review criteria, the eccho lens, and the 
    `base`/`head` set to the input's `before`/`after` (if `before` is missing — a `review` comment —
    take the head SHA from `get_pull_request` and use the head SHA from your most recent prior review,
    stated in its summary, as the base; if you have no prior review, do a full review).
-3. Call `assess_pr_scope` with the changed files. It returns the recommended specialist
-   `dimensions`. Honor it, but you may add a dimension your judgment says is warranted.
+3. Call `assess_pr_scope` with the changed files. It returns the specialist `dimensions`
+   to run. Honor it strictly — do not add dimensions beyond what it returns.
 4. The `domain_reviewer` reads the repo at the PR head through its own
    `read_repo_file` / `list_repo_tree` tools (no checkout needed).
 5. Delegate to the recommended specialists — `architect_reviewer`, `test_reviewer`,

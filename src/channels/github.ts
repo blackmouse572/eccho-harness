@@ -57,7 +57,8 @@ export const channel = createGitHubChannel({
 			const ref = { owner, repo, issueNumber: pull_request.number };
 			const id = channel.conversationKey(ref);
 
-			if (action === 'opened' || action === 'reopened') {
+			if (action === 'opened' || action === 'reopened' || action === 'ready_for_review') {
+				if (pull_request.draft) return; // skip draft PRs
 				await dispatch(prReviewer, {
 					id,
 					input: {
@@ -75,6 +76,24 @@ export const channel = createGitHubChannel({
 				await createPullRequestGateway({ owner, repo, issueNumber: pull_request.number })
 					.postComment('> Comment `/review` for an incremental review or `/full-review` for a full review.')
 					.catch(() => {});
+				return;
+			}
+
+			if (action === 'synchronize') {
+				await dispatch(prReviewer, {
+					id,
+					input: {
+						type: 'github.pull_request.review',
+						command: 'incremental',
+						deliveryId: delivery.deliveryId,
+						owner,
+						repo,
+						pr: pull_request.number,
+						before: delivery.payload.before,
+						after: delivery.payload.after,
+						reason: 'New commits pushed to the pull request.',
+					},
+				});
 				return;
 			}
 			return;

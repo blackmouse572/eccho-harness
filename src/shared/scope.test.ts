@@ -7,13 +7,25 @@ test('docs-only change recommends no specialists', () => {
 	expect(s.dimensions).toEqual([]);
 });
 
-test('small source change pulls in architecture + testing only', () => {
+test('tiny source change (<100 lines) gets no specialists', () => {
 	const s = assessScope([{ filename: 'src/foo.ts', additions: 60, deletions: 10, status: 'modified' }]);
+	expect(s.size).toBe('tiny');
+	expect(s.dimensions).toEqual([]);
+});
+
+test('source change of exactly 100 lines is classified small with architecture', () => {
+	const s = assessScope([{ filename: 'src/foo.ts', additions: 60, deletions: 40, status: 'modified' }]);
 	expect(s.size).toBe('small');
 	expect(s.dimensions).toContain('architecture');
-	expect(s.dimensions).toContain('testing');
+	expect(s.dimensions).not.toContain('testing');
 	expect(s.dimensions).not.toContain('security');
-	expect(s.dimensions).not.toContain('domain');
+});
+
+test('medium source change (300 lines) gets architecture and testing', () => {
+	const s = assessScope([{ filename: 'src/foo.ts', additions: 200, deletions: 100, status: 'modified' }]);
+	expect(s.size).toBe('medium');
+	expect(s.dimensions).toContain('architecture');
+	expect(s.dimensions).toContain('testing');
 });
 
 test('a security-sensitive path pulls in security even when tiny', () => {
@@ -27,10 +39,15 @@ test('an ADR change pulls in domain', () => {
 	expect(s.dimensions).toContain('domain');
 });
 
-test('a large source change pulls in all four dimensions', () => {
+test('source-only change of 200 lines does not get domain', () => {
+	const s = assessScope([{ filename: 'src/foo.ts', additions: 150, deletions: 50, status: 'modified' }]);
+	expect(s.dimensions).not.toContain('domain');
+});
+
+test('a large source-only change gets architecture, testing, and security', () => {
 	const s = assessScope([{ filename: 'src/big.ts', additions: 500, deletions: 200, status: 'modified' }]);
 	expect(s.size).toBe('large');
-	expect(new Set(s.dimensions)).toEqual(new Set(['architecture', 'testing', 'security', 'domain']));
+	expect(new Set(s.dimensions)).toEqual(new Set(['architecture', 'testing', 'security']));
 });
 
 test('filesForDimension scopes each reviewer to its relevant files', () => {

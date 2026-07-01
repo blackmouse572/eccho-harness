@@ -81,7 +81,7 @@ export function assessScope(files: ChangedFile[]): ScopeAssessment {
 	}
 
 	const size: ChangeSize =
-		totalChanges < 30 ? 'tiny' : totalChanges < 150 ? 'small' : totalChanges < 600 ? 'medium' : 'large';
+		totalChanges < 100 ? 'tiny' : totalChanges < 300 ? 'small' : totalChanges < 600 ? 'medium' : 'large';
 
 	const dimensions: ReviewDimension[] = [];
 	const reasons: string[] = [];
@@ -90,17 +90,17 @@ export function assessScope(files: ChangedFile[]): ScopeAssessment {
 		dimensions.push('architecture');
 		reasons.push('source changed beyond trivial size');
 	}
-	if (anySource) {
+	if (anySource && size !== 'tiny' && size !== 'small') {
 		dimensions.push('testing');
-		reasons.push(anyTest ? 'tests touched' : 'source changed (TDD: tests expected)');
+		reasons.push(anyTest ? 'tests touched' : 'source changed at medium+ scale');
 	}
 	if (anySensitive || size === 'large' || (anySource && totalChanges >= 300)) {
 		dimensions.push('security');
 		reasons.push(anySensitive ? 'security-sensitive paths touched' : 'large source change');
 	}
-	if (anyAdr || (anySource && totalChanges >= 80)) {
+	if (anyAdr) {
 		dimensions.push('domain');
-		reasons.push(anyAdr ? 'ADR/CONTEXT touched' : 'meaningful behavior change');
+		reasons.push('ADR/CONTEXT touched');
 	}
 
 	if (dimensions.length === 0) {
