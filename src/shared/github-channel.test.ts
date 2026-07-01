@@ -22,14 +22,14 @@ mock.module('../agents/issue-classifier.ts', () => ({ default: 'issue-classifier
 mock.module('../agents/issue-triager.ts', () => ({ default: 'issue-triager' }));
 const hintComments: Array<{ owner: string; repo: string; pr: number; body: string }> = [];
 
-mock.module('../shared/pull-requests.ts', () => ({
+mock.module('./pull-requests.ts', () => ({
 	createPullRequestGateway: ({ owner, repo, issueNumber: pr }: { owner: string; repo: string; issueNumber: number }) => ({
 		postComment: async (body: string) => { hintComments.push({ owner, repo, pr, body }); },
 		react: async () => {},
 	}),
 }));
 
-await import('./github.ts');
+await import('../channels/github.ts');
 
 function makePRDelivery(action: string, draft: boolean) {
 	return {
