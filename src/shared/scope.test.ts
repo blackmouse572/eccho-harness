@@ -44,7 +44,7 @@ test('source-only change of 200 lines does not get domain', () => {
 	expect(s.dimensions).not.toContain('domain');
 });
 
-test('a large source change pulls in all four dimensions', () => {
+test('a large source-only change gets architecture, testing, and security', () => {
 	const s = assessScope([{ filename: 'src/big.ts', additions: 500, deletions: 200, status: 'modified' }]);
 	expect(s.size).toBe('large');
 	expect(new Set(s.dimensions)).toEqual(new Set(['architecture', 'testing', 'security']));
