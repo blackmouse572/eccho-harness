@@ -17,7 +17,15 @@ test('source change of exactly 100 lines is classified small with architecture',
 	const s = assessScope([{ filename: 'src/foo.ts', additions: 60, deletions: 40, status: 'modified' }]);
 	expect(s.size).toBe('small');
 	expect(s.dimensions).toContain('architecture');
+	expect(s.dimensions).not.toContain('testing');
 	expect(s.dimensions).not.toContain('security');
+});
+
+test('medium source change (300 lines) gets architecture and testing', () => {
+	const s = assessScope([{ filename: 'src/foo.ts', additions: 200, deletions: 100, status: 'modified' }]);
+	expect(s.size).toBe('medium');
+	expect(s.dimensions).toContain('architecture');
+	expect(s.dimensions).toContain('testing');
 });
 
 test('a security-sensitive path pulls in security even when tiny', () => {

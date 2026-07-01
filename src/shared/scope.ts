@@ -90,9 +90,9 @@ export function assessScope(files: ChangedFile[]): ScopeAssessment {
 		dimensions.push('architecture');
 		reasons.push('source changed beyond trivial size');
 	}
-	if (anySource && size !== 'tiny') {
+	if (anySource && size !== 'tiny' && size !== 'small') {
 		dimensions.push('testing');
-		reasons.push(anyTest ? 'tests touched' : 'source changed (TDD: tests expected)');
+		reasons.push(anyTest ? 'tests touched' : 'source changed at medium+ scale');
 	}
 	if (anySensitive || size === 'large' || (anySource && totalChanges >= 300)) {
 		dimensions.push('security');
