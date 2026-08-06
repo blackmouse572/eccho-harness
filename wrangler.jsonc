@@ -6,7 +6,9 @@
 
   // Retention window for the scheduled storage cleanup (days).
   "vars": {
-    "FLUE_RETENTION_DAYS": "30"
+    "FLUE_RETENTION_DAYS": "30",
+    // Cooldown (seconds) before a burst of pushes is reviewed once as a whole.
+    "FLUE_SYNCHRONIZE_COOLDOWN_SECONDS": "300"
   },
 
   // Daily cleanup: prune stale GitHub-conversation state and trigger retention

@@ -5,6 +5,7 @@
 // what src/cloudflare.ts and src/shared/retention.ts need.
 declare module 'cloudflare:workers' {
 	export class DurableObject<Env = unknown> {
+		constructor(ctx: DurableObjectState, env: Env);
 		readonly ctx: DurableObjectState;
 		readonly env: Env;
 	}
@@ -19,6 +20,9 @@ interface DurableObjectStorage {
 	readonly sql: {
 		exec(query: string, ...bindings: unknown[]): { toArray(): Array<Record<string, unknown>> };
 	};
+	setAlarm(scheduledTime: number): Promise<void>;
+	getAlarm(): Promise<number | null>;
+	deleteAlarm(): Promise<void>;
 }
 
 interface DurableObjectId {

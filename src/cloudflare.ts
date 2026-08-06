@@ -1,9 +1,11 @@
 // Worker-level Cloudflare code: an application-owned Durable Object that tracks
-// GitHub conversation state (admission dedup + lifecycle), plus the scheduled
-// handler that prunes stale records and triggers retention cleanup.
+// GitHub conversation state (admission dedup, push-burst coalescing, lifecycle),
+// plus the scheduled handler that prunes stale records and triggers retention
+// cleanup.
 //
 // Named exports become Worker exports; Flue keeps HTTP composition in app.ts.
 import { DurableObject } from 'cloudflare:workers';
+import { dispatch } from '@flue/runtime';
 
 const DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -14,6 +16,10 @@ interface ConversationRecord {
 	number: number;
 	kind: 'pr' | 'issue';
 	agents: string[];
+}
+
+interface StateEnv {
+	FLUE_SYNCHRONIZE_COOLDOWN_SECONDS?: string;
 }
 
 function toRecord(row: Record<string, unknown>): ConversationRecord {
@@ -38,10 +44,45 @@ function parseAgents(value: unknown): string[] {
 }
 
 // Per-conversation GitHub state: which head SHA was last dispatched (PR review
-// dedup), whether the conversation is open/closed, and the agent instances
-// involved (so the scheduled handler can address exactly the objects that
-// exist). Singleton instance addressed by name 'default'.
-export class FlueGithubState extends DurableObject {
+// dedup), pending push-burst heads awaiting a coalesced review, whether the
+// conversation is open/closed, and the agent instances involved (so the
+// scheduled handler can address exactly the objects that exist). Singleton
+// instance addressed by name 'default'.
+export class FlueGithubState extends DurableObject<StateEnv> {
+	constructor(ctx: DurableObjectState, env: StateEnv) {
+		super(ctx, env);
+		this.ensureSchema();
+	}
+
+	private ensureSchema(): void {
+		const sql = this.ctx.storage.sql;
+		sql.exec('CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)');
+		sql.exec(`CREATE TABLE IF NOT EXISTS conversations (
+			key TEXT PRIMARY KEY,
+			owner TEXT NOT NULL,
+			repo TEXT NOT NULL,
+			number INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			agents TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'open',
+			last_head_sha TEXT,
+			last_dispatch_at INTEGER,
+			last_activity_at INTEGER NOT NULL,
+			closed_at INTEGER,
+			pending_head TEXT,
+			pending_since INTEGER
+		)`);
+		// Add columns to tables deployed before they existed (idempotent).
+		const columns = new Set(sql.exec('PRAGMA table_info(conversations)').toArray().map((row) => String(row.name)));
+		if (!columns.has('pending_head')) sql.exec('ALTER TABLE conversations ADD COLUMN pending_head TEXT');
+		if (!columns.has('pending_since')) sql.exec('ALTER TABLE conversations ADD COLUMN pending_since INTEGER');
+	}
+
+	private cooldownMs(): number {
+		const seconds = Number(this.env.FLUE_SYNCHRONIZE_COOLDOWN_SECONDS ?? 300);
+		return (Number.isFinite(seconds) && seconds > 0 ? seconds : 300) * 1000;
+	}
+
 	async recordDelivery(id: string): Promise<boolean> {
 		const inserted = this.ctx.storage.sql
 			.exec('INSERT OR IGNORE INTO deliveries (id, seen_at) VALUES (?, ?) RETURNING id', id, Date.now())
@@ -50,14 +91,15 @@ export class FlueGithubState extends DurableObject {
 	}
 
 	// Record a dispatch. Returns false when the PR head was already dispatched,
-	// so the webhook can skip the redundant review run.
+	// so the webhook can skip the redundant review run. Clears any coalesced
+	// pending head — a full review covers the whole PR.
 	async noteDispatch(record: ConversationRecord & { headSha?: string }): Promise<boolean> {
 		const now = Date.now();
 		if (record.headSha) {
 			const existing = this.ctx.storage.sql.exec('SELECT last_head_sha FROM conversations WHERE key = ?', record.key).toArray()[0];
 			if (existing && existing.last_head_sha === record.headSha) {
 				this.ctx.storage.sql.exec(
-					'UPDATE conversations SET last_activity_at = ?, last_dispatch_at = ? WHERE key = ?',
+					'UPDATE conversations SET last_activity_at = ?, last_dispatch_at = ?, pending_head = NULL, pending_since = NULL WHERE key = ?',
 					now,
 					now,
 					record.key,
@@ -74,7 +116,8 @@ export class FlueGithubState extends DurableObject {
 			   state = CASE WHEN conversations.state = 'closed' THEN 'open' ELSE conversations.state END,
 			   last_head_sha = excluded.last_head_sha,
 			   last_dispatch_at = excluded.last_dispatch_at,
-			   last_activity_at = excluded.last_activity_at`,
+			   last_activity_at = excluded.last_activity_at,
+			   pending_head = NULL, pending_since = NULL`,
 			record.key,
 			record.owner,
 			record.repo,
@@ -88,13 +131,76 @@ export class FlueGithubState extends DurableObject {
 		return true;
 	}
 
+	// Synchronize handling with trailing-edge debounce: a push within the
+	// cooldown window after the last dispatch is remembered as `pending_head`
+	// and reviewed by the alarm once the burst goes quiet. Returns whether the
+	// webhook should dispatch a review now.
+	async maybeDispatchSynchronize(record: ConversationRecord & { headSha: string }): Promise<boolean> {
+		const now = Date.now();
+		const cooldown = this.cooldownMs();
+		const existing = this.ctx.storage.sql
+			.exec('SELECT last_head_sha, last_dispatch_at FROM conversations WHERE key = ?', record.key)
+			.toArray()[0];
+		const lastHead = typeof existing?.last_head_sha === 'string' ? existing.last_head_sha : null;
+		const lastDispatchAt = typeof existing?.last_dispatch_at === 'number' ? existing.last_dispatch_at : 0;
+
+		if (lastHead === record.headSha) return false;
+
+		if (now - lastDispatchAt < cooldown) {
+			this.ctx.storage.sql.exec(
+				`INSERT INTO conversations (key, owner, repo, number, kind, agents, state, pending_head, pending_since, last_activity_at)
+				 VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+				 ON CONFLICT(key) DO UPDATE SET
+				   owner = excluded.owner, repo = excluded.repo, number = excluded.number, kind = excluded.kind,
+				   agents = excluded.agents,
+				   state = CASE WHEN conversations.state = 'closed' THEN 'open' ELSE conversations.state END,
+				   pending_head = excluded.pending_head, pending_since = excluded.pending_since,
+				   last_activity_at = excluded.last_activity_at`,
+				record.key,
+				record.owner,
+				record.repo,
+				record.number,
+				record.kind,
+				JSON.stringify(record.agents),
+				record.headSha,
+				now,
+				now,
+			);
+			await this.ctx.storage.setAlarm(now + cooldown);
+			return false;
+		}
+
+		this.ctx.storage.sql.exec(
+			`INSERT INTO conversations (key, owner, repo, number, kind, agents, state, last_head_sha, last_dispatch_at, last_activity_at)
+			 VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+			 ON CONFLICT(key) DO UPDATE SET
+			   owner = excluded.owner, repo = excluded.repo, number = excluded.number, kind = excluded.kind,
+			   agents = excluded.agents,
+			   state = CASE WHEN conversations.state = 'closed' THEN 'open' ELSE conversations.state END,
+			   last_head_sha = excluded.last_head_sha,
+			   last_dispatch_at = excluded.last_dispatch_at,
+			   last_activity_at = excluded.last_activity_at,
+			   pending_head = NULL, pending_since = NULL`,
+			record.key,
+			record.owner,
+			record.repo,
+			record.number,
+			record.kind,
+			JSON.stringify(record.agents),
+			record.headSha,
+			now,
+			now,
+		);
+		return true;
+	}
+
 	async markClosed(record: ConversationRecord): Promise<void> {
 		const now = Date.now();
 		this.ctx.storage.sql.exec(
 			`INSERT INTO conversations (key, owner, repo, number, kind, agents, state, last_activity_at, closed_at)
 			 VALUES (?, ?, ?, ?, ?, ?, 'closed', ?, ?)
 			 ON CONFLICT(key) DO UPDATE SET
-			   state = 'closed', closed_at = ?, last_activity_at = ?`,
+			   state = 'closed', closed_at = ?, last_activity_at = ?, pending_head = NULL, pending_since = NULL`,
 			record.key,
 			record.owner,
 			record.repo,
@@ -106,6 +212,61 @@ export class FlueGithubState extends DurableObject {
 			now,
 			now,
 		);
+	}
+
+	// Alarm: dispatch the coalesced review for push bursts that have gone quiet,
+	// then re-arm while any pending head remains.
+	async alarm(): Promise<void> {
+		const now = Date.now();
+		const cooldown = this.cooldownMs();
+		const due = this.ctx.storage.sql
+			.exec(
+				`SELECT key, owner, repo, number, agents, pending_head
+				 FROM conversations
+				 WHERE pending_head IS NOT NULL AND pending_since + ? <= ?`,
+				cooldown,
+				now,
+			)
+			.toArray();
+
+		for (const row of due) {
+			const key = String(row.key);
+			const head = typeof row.pending_head === 'string' ? row.pending_head : null;
+			if (!key || !head) continue;
+			try {
+				await dispatch({
+					agent: 'pr-reviewer',
+					id: key,
+					input: {
+						type: 'github.pull_request.review',
+						command: 'incremental',
+						deliveryId: `coalesced:${head.slice(0, 12)}`,
+						owner: String(row.owner),
+						repo: String(row.repo),
+						pr: Number(row.number),
+						after: head,
+						reason: 'Coalesced push burst — reviewing the latest head.',
+					},
+				});
+			} catch (error) {
+				console.warn('[github] coalesced review dispatch failed', key, error);
+				continue;
+			}
+			this.ctx.storage.sql.exec(
+				'UPDATE conversations SET last_head_sha = ?, last_dispatch_at = ?, last_activity_at = ?, pending_head = NULL, pending_since = NULL WHERE key = ?',
+				head,
+				now,
+				now,
+				key,
+			);
+		}
+
+		const remaining = this.ctx.storage.sql
+			.exec('SELECT MIN(pending_since) AS earliest FROM conversations WHERE pending_head IS NOT NULL')
+			.toArray()[0];
+		if (remaining && typeof remaining.earliest === 'number') {
+			await this.ctx.storage.setAlarm(remaining.earliest + cooldown);
+		}
 	}
 
 	// Conversations past their retention window (closed or idle), with the

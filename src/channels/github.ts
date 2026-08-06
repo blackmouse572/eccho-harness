@@ -144,18 +144,18 @@ export const channel = createGitHubChannel({
 			}
 
 			if (action === 'synchronize') {
-				// Coalesce pushes: skip when this head was already dispatched, so
-				// re-pushes and burst pushes don't each admit a full review run.
 				const after = delivery.payload.after;
-				const recorded = await withState(state, (s) =>
-					s.noteDispatch({
+				// Trailing-edge debounce: pushes inside the cooldown window are
+				// coalesced and reviewed once the burst goes quiet (the state DO
+				// dispatches the latest head via alarm). Skip re-pushes entirely.
+				const shouldDispatch = (await withState(state, (s) =>
+					s.maybeDispatchSynchronize({
 						...conversationRecord({ key: id, owner, repo, number: pull_request.number }, 'pr', ['pr-reviewer']),
 						headSha: after,
 					}),
-				);
-				const isNew = recorded ?? true;
-				if (!isNew) {
-					console.log(`[pull_request] skip already-dispatched head ${String(after).slice(0, 7)} ${pr}`);
+				)) ?? true;
+				if (!shouldDispatch) {
+					console.log(`[pull_request] coalesced/skip push head=${String(after).slice(0, 7)} ${pr}`);
 					return;
 				}
 				console.log(`[pull_request] dispatch incremental review ${pr} before=${String(delivery.payload.before).slice(0, 7)} after=${String(after).slice(0, 7)}`);
