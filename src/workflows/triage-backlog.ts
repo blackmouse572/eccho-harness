@@ -43,21 +43,29 @@ export default defineWorkflow({
 		await createIssueGateway({ owner, repo, issueNumber: targets[0]!.number }).ensureLabels(MISSING_LABELS);
 
 		const triaged: number[] = [];
-		for (let i = 0; i < targets.length; i += concurrency) {
-			const batch = targets.slice(i, i + concurrency);
-			await Promise.all(
-				batch.map(async (issue) => {
-					const gw = createIssueGateway({ owner, repo, issueNumber: issue.number });
-					const session = await harness.session(`issue-${issue.number}`);
-					await session.skill(triageSkill, {
-						args: { command: 'triage', owner, repo, issue: issue.number, title: issue.title },
-						tools: createTriagerTools(gw),
-					});
-					triaged.push(issue.number);
-				}),
-			);
-		}
+		const usedSessions = new Set<string>();
+		try {
+			for (let i = 0; i < targets.length; i += concurrency) {
+				const batch = targets.slice(i, i + concurrency);
+				await Promise.all(
+					batch.map(async (issue) => {
+						const gw = createIssueGateway({ owner, repo, issueNumber: issue.number });
+						usedSessions.add(`issue-${issue.number}`);
+						const session = await harness.session(`issue-${issue.number}`);
+						await session.skill(triageSkill, {
+							args: { command: 'triage', owner, repo, issue: issue.number, title: issue.title },
+							tools: createTriagerTools(gw),
+						});
+						triaged.push(issue.number);
+					}),
+				);
+			}
 
-		return { count: triaged.length, triaged };
+			return { count: triaged.length, triaged };
+		} finally {
+			for (const name of usedSessions) {
+				await harness.sessions.delete(name).catch((error) => console.warn(`[workflow] delete session "${name}" failed`, error));
+			}
+		}
 	},
 });

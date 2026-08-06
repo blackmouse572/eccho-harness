@@ -4,6 +4,25 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Retention window for the scheduled storage cleanup (days).
+  "vars": {
+    "FLUE_RETENTION_DAYS": "30"
+  },
+
+  // Daily cleanup: prune stale GitHub-conversation state and trigger retention
+  // cleanup on agent instances whose conversations are closed or idle.
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+
+  // Application-owned Durable Object: GitHub conversation state (admission
+  // dedup + lifecycle). Export + class live in src/cloudflare.ts.
+  "durable_objects": {
+    "bindings": [
+      { "name": "FLUE_GITHUB_STATE", "class_name": "FlueGithubState" }
+    ]
+  },
+
   // Workers Logs — so background agent work is visible (`wrangler tail` / dashboard).
   "observability": {
     "enabled": true,
@@ -39,6 +58,10 @@
     {
       "tag": "v5",
       "new_sqlite_classes": ["FlueTriageBacklogWorkflow"]
+    },
+    {
+      "tag": "v6",
+      "new_sqlite_classes": ["FlueGithubState"]
     }
   ]
 }

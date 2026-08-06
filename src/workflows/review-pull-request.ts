@@ -58,62 +58,73 @@ export default defineWorkflow({
 		const { owner, repo, pr } = input;
 		const gw = createPullRequestGateway({ owner, repo, issueNumber: pr });
 
-		// 1. PR context + changed files.
-		const prInfo = await gw.get();
+		// Sessions accumulate across runs in this workflow's Durable Object, so
+		// prune each one once the run is done (children are removed with it).
+		const usedSessions = new Set<string>();
+		try {
+			// 1. PR context + changed files.
+			const prInfo = await gw.get();
 
-		// 2. Scope → which specialists to run.
-		const dimensions = assessScope(prInfo.changedFiles).dimensions;
+			// 2. Scope → which specialists to run.
+			const dimensions = assessScope(prInfo.changedFiles).dimensions;
 
-		// Idempotency on re-run: skip before expensive work if a review covers this head.
-		const idempotencyKey = `head:${prInfo.headSha}`;
-		const existing = await gw.findReview(idempotencyKey);
-		if (existing) {
-			return { reviewUrl: existing.url, dimensions, deduped: true };
+			// Idempotency on re-run: skip before expensive work if a review covers this head.
+			const idempotencyKey = `head:${prInfo.headSha}`;
+			const existing = await gw.findReview(idempotencyKey);
+			if (existing) {
+				return { reviewUrl: existing.url, dimensions, deduped: true };
+			}
+
+			// 3. Fan out to the recommended specialists IN PARALLEL — each gets only
+			//    its scoped slice of the diff. Separate sessions avoid contention.
+			//    The domain reviewer gets repo-read tools (GitHub API) for this PR.
+			const findings: Array<{ dimension: string } & Findings> = await Promise.all(
+				dimensions.map(async (dimension) => {
+					usedSessions.add(dimension);
+					const session = await harness.session(dimension);
+					const res = await session.task(
+						buildSpecialistPrompt({
+							dimension,
+							prTitle: prInfo.title,
+							prBody: prInfo.body,
+							diff: scopedDiff(dimension, prInfo.changedFiles),
+						}),
+						{
+							agent: dimensionAgent[dimension],
+							result: FindingsSchema,
+							...(dimension === 'domain' ? { tools: domainRepoTools(gw) } : {}),
+						},
+					);
+					return { dimension, ...res.data };
+				}),
+			);
+
+			// 5. Synthesize one review (or review the diff directly if nothing fanned out).
+			usedSessions.add('synthesis');
+			const synthSession = await harness.session('synthesis');
+			const synthInput =
+				dimensions.length > 0
+					? `Synthesize these specialist findings into one pull-request review for #${pr} ("${prInfo.title}").\n\n${JSON.stringify(findings, null, 2)}`
+					: `Review this trivial change to PR #${pr} ("${prInfo.title}") directly.\n\n\`\`\`diff\n${await gw.diff()}\n\`\`\``;
+			const synth = await synthSession.skill(reviewPr, {
+				args: { request: synthInput },
+				result: SynthSchema,
+			});
+
+			// 6. Post one review and mark the PR review state via the API
+			//    (deterministic step — approve / request_changes / comment).
+			const result = await gw.postReview({
+				summary: synth.data.summary,
+				idempotencyKey,
+				comments: synth.data.comments,
+				event: VERDICT_EVENT[synth.data.verdict],
+			});
+
+			return { reviewUrl: result.url, dimensions, deduped: result.deduped, event: result.event };
+		} finally {
+			for (const name of usedSessions) {
+				await harness.sessions.delete(name).catch((error) => console.warn(`[workflow] delete session "${name}" failed`, error));
+			}
 		}
-
-		// 3. Fan out to the recommended specialists IN PARALLEL — each gets only
-		//    its scoped slice of the diff. Separate sessions avoid contention.
-		//    The domain reviewer gets repo-read tools (GitHub API) for this PR.
-		const findings: Array<{ dimension: string } & Findings> = await Promise.all(
-			dimensions.map(async (dimension) => {
-				const session = await harness.session(dimension);
-				const res = await session.task(
-					buildSpecialistPrompt({
-						dimension,
-						prTitle: prInfo.title,
-						prBody: prInfo.body,
-						diff: scopedDiff(dimension, prInfo.changedFiles),
-					}),
-					{
-						agent: dimensionAgent[dimension],
-						result: FindingsSchema,
-						...(dimension === 'domain' ? { tools: domainRepoTools(gw) } : {}),
-					},
-				);
-				return { dimension, ...res.data };
-			}),
-		);
-
-		// 5. Synthesize one review (or review the diff directly if nothing fanned out).
-		const synthSession = await harness.session('synthesis');
-		const synthInput =
-			dimensions.length > 0
-				? `Synthesize these specialist findings into one pull-request review for #${pr} ("${prInfo.title}").\n\n${JSON.stringify(findings, null, 2)}`
-				: `Review this trivial change to PR #${pr} ("${prInfo.title}") directly.\n\n\`\`\`diff\n${await gw.diff()}\n\`\`\``;
-		const synth = await synthSession.skill(reviewPr, {
-			args: { request: synthInput },
-			result: SynthSchema,
-		});
-
-		// 6. Post one review and mark the PR review state via the API
-		//    (deterministic step — approve / request_changes / comment).
-		const result = await gw.postReview({
-			summary: synth.data.summary,
-			idempotencyKey,
-			comments: synth.data.comments,
-			event: VERDICT_EVENT[synth.data.verdict],
-		});
-
-		return { reviewUrl: result.url, dimensions, deduped: result.deduped, event: result.event };
 	},
 });

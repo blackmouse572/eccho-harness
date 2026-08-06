@@ -5,7 +5,11 @@ import { channel } from '../channels/github.ts';
 import { assessPrScope } from '../actions/assess-pr-scope.ts';
 import { architectReviewer, makeDomainReviewer, securityReviewer, testReviewer } from '../shared/reviewers.ts';
 import { createPullRequestGateway } from '../shared/pull-requests.ts';
+import { createRetentionExtension } from '../shared/retention.ts';
 import { createReviewTools } from '../shared/review-tools.ts';
+
+// Self-scheduled storage cleanup (see shared/retention.ts).
+export const cloudflare = createRetentionExtension();
 
 // Master orchestrator: one durable instance per pull request (id = channel
 // conversation key, which encodes the trusted owner/repo/PR number). Holds

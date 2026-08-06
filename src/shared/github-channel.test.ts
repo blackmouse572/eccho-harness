@@ -57,7 +57,7 @@ beforeEach(() => {
 test('auto-reviews a non-draft PR when opened', async () => {
 	await capturedWebhook!({ delivery: makePRDelivery('opened', false) });
 	expect(dispatched).toHaveLength(1);
-	expect((dispatched[0].payload as { input: { command: string } }).input.command).toBe('full');
+	expect((dispatched[0]!.payload as { input: { command: string } }).input.command).toBe('full');
 });
 
 test('skips auto-review for draft PRs opened as draft', async () => {
@@ -68,7 +68,7 @@ test('skips auto-review for draft PRs opened as draft', async () => {
 test('auto-reviews when draft is converted to ready_for_review', async () => {
 	await capturedWebhook!({ delivery: makePRDelivery('ready_for_review', false) });
 	expect(dispatched).toHaveLength(1);
-	expect((dispatched[0].payload as { input: { command: string } }).input.command).toBe('full');
+	expect((dispatched[0]!.payload as { input: { command: string } }).input.command).toBe('full');
 });
 
 test('auto-reviews a non-draft PR when reopened', async () => {
@@ -79,5 +79,5 @@ test('auto-reviews a non-draft PR when reopened', async () => {
 test('posts hint comment when non-draft PR is opened', async () => {
 	await capturedWebhook!({ delivery: makePRDelivery('opened', false) });
 	expect(hintComments).toHaveLength(1);
-	expect(hintComments[0].body).toContain('/review');
+	expect(hintComments[0]!.body).toContain('/review');
 });

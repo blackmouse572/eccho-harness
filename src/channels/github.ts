@@ -5,6 +5,40 @@ import prReviewer from '../agents/pr-reviewer.ts';
 import issueClassifier from '../agents/issue-classifier.ts';
 import issueTriager from '../agents/issue-triager.ts';
 import { createPullRequestGateway } from '../shared/pull-requests.ts';
+import type { FlueGithubState } from '../cloudflare.ts';
+
+// Application-owned Durable Object that deduplicates deliveries and tracks
+// per-conversation lifecycle (head SHA, open/closed). Best-effort: when the
+// binding is missing the webhook degrades to the previous always-dispatch
+// behavior.
+function stateStub(c: { env: object | undefined } | undefined): DurableObjectStub<FlueGithubState> | null {
+	const env = c?.env as Record<string, unknown> | undefined;
+	const ns = env?.FLUE_GITHUB_STATE as DurableObjectNamespace<FlueGithubState> | undefined;
+	return ns ? ns.get(ns.idFromName('default')) : null;
+}
+
+// Best-effort state-DO access: a dedup/lifecycle failure must never drop a
+// GitHub delivery, so degrade to the previous always-dispatch behavior.
+async function withState<T>(state: DurableObjectStub<FlueGithubState> | null, fn: (s: DurableObjectStub<FlueGithubState>) => Promise<T>): Promise<T | undefined> {
+	if (!state) return undefined;
+	try {
+		return await fn(state);
+	} catch (error) {
+		console.warn('[github] state DO call failed:', error);
+		return undefined;
+	}
+}
+
+interface ConversationRef {
+	key: string;
+	owner: string;
+	repo: string;
+	number: number;
+}
+
+function conversationRecord(ref: ConversationRef, kind: 'pr' | 'issue', agents: string[]) {
+	return { ...ref, kind, agents };
+}
 
 // The bot authenticates with a PAT, so its OWN comments arrive as sender type
 // `User`, not `Bot`. Without this, the bot would react to (and loop on) its own
@@ -46,8 +80,20 @@ async function ackProcessing(
 export const channel = createGitHubChannel({
 	webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
 
-	async webhook({ delivery }): Promise<undefined> {
+	async webhook({ delivery, c }): Promise<undefined> {
 		console.log(`[webhook] ${delivery.name} delivery=${delivery.deliveryId}`);
+
+		const state = stateStub(c);
+
+		// GitHub can redeliver an event with the same deliveryId. Skip the
+		// duplicate so each delivery only admits (and writes) work once.
+		if (delivery.deliveryId) {
+			const isDuplicate = (await withState(state, (s) => s.recordDelivery(delivery.deliveryId!))) === false;
+			if (isDuplicate) {
+				console.log(`[webhook] duplicate delivery ${delivery.deliveryId} — skip`);
+				return;
+			}
+		}
 
 		// --- New / reopened PR, or new commits pushed to a PR -----------------
 		if (delivery.name === 'pull_request') {
@@ -71,6 +117,12 @@ export const channel = createGitHubChannel({
 					return;
 				}
 				console.log(`[pull_request] dispatch full review ${pr} action=${action} head=${pull_request.head.sha.slice(0, 7)}`);
+				await withState(state, (s) =>
+					s.noteDispatch({
+						...conversationRecord({ key: id, owner, repo, number: pull_request.number }, 'pr', ['pr-reviewer']),
+						headSha: pull_request.head.sha,
+					}),
+				);
 				await dispatch(prReviewer, {
 					id,
 					input: {
@@ -92,7 +144,21 @@ export const channel = createGitHubChannel({
 			}
 
 			if (action === 'synchronize') {
-				console.log(`[pull_request] dispatch incremental review ${pr} before=${String(delivery.payload.before).slice(0, 7)} after=${String(delivery.payload.after).slice(0, 7)}`);
+				// Coalesce pushes: skip when this head was already dispatched, so
+				// re-pushes and burst pushes don't each admit a full review run.
+				const after = delivery.payload.after;
+				const recorded = await withState(state, (s) =>
+					s.noteDispatch({
+						...conversationRecord({ key: id, owner, repo, number: pull_request.number }, 'pr', ['pr-reviewer']),
+						headSha: after,
+					}),
+				);
+				const isNew = recorded ?? true;
+				if (!isNew) {
+					console.log(`[pull_request] skip already-dispatched head ${String(after).slice(0, 7)} ${pr}`);
+					return;
+				}
+				console.log(`[pull_request] dispatch incremental review ${pr} before=${String(delivery.payload.before).slice(0, 7)} after=${String(after).slice(0, 7)}`);
 				await dispatch(prReviewer, {
 					id,
 					input: {
@@ -107,6 +173,12 @@ export const channel = createGitHubChannel({
 						reason: 'New commits pushed to the pull request.',
 					},
 				});
+				return;
+			}
+
+			if (action === 'closed') {
+				console.log(`[pull_request] closed ${pr}`);
+				await withState(state, (s) => s.markClosed(conversationRecord({ key: id, owner, repo, number: pull_request.number }, 'pr', ['pr-reviewer'])));
 				return;
 			}
 
@@ -133,6 +205,11 @@ export const channel = createGitHubChannel({
 			const owner = repository.owner.login;
 			const repo = repository.name;
 			console.log(`[issues] dispatch classify ${issueRef} author=${sender.login}`);
+			await withState(state, (s) =>
+				s.noteDispatch(
+					conversationRecord({ key: channel.conversationKey({ owner, repo, issueNumber: issue.number }), owner, repo, number: issue.number }, 'issue', ['issue-classifier']),
+				),
+			);
 			await dispatch(issueClassifier, {
 				id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
 				input: {
@@ -172,6 +249,11 @@ export const channel = createGitHubChannel({
 				const owner = repository.owner.login;
 				const repo = repository.name;
 				console.log(`[issue_comment] dispatch triage ${ref} directive=${directive ?? 'auto'} requester=${sender.login}`);
+				await withState(state, (s) =>
+					s.noteDispatch(
+						conversationRecord({ key: channel.conversationKey({ owner, repo, issueNumber: issue.number }), owner, repo, number: issue.number }, 'issue', ['issue-triager']),
+					),
+				);
 				await dispatch(issueTriager, {
 					id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
 					input: {
@@ -199,6 +281,11 @@ export const channel = createGitHubChannel({
 			const repo = repository.name;
 			console.log(`[issue_comment] dispatch ${command} review ${ref} sender=${sender.login}`);
 			await ackProcessing({ owner, repo, pr: issue.number }, comment.id, 'issue');
+			await withState(state, (s) =>
+				s.noteDispatch(
+					conversationRecord({ key: channel.conversationKey({ owner, repo, issueNumber: issue.number }), owner, repo, number: issue.number }, 'pr', ['pr-reviewer']),
+				),
+			);
 			await dispatch(prReviewer, {
 				id: channel.conversationKey({ owner, repo, issueNumber: issue.number }),
 				input: {
@@ -232,6 +319,11 @@ export const channel = createGitHubChannel({
 			const repo = repository.name;
 			console.log(`[review_comment] dispatch reply ${pr} sender=${sender.login} comment=${comment.id}`);
 			await ackProcessing({ owner, repo, pr: pull_request.number }, comment.id, 'review');
+			await withState(state, (s) =>
+				s.noteDispatch(
+					conversationRecord({ key: channel.conversationKey({ owner, repo, issueNumber: pull_request.number }), owner, repo, number: pull_request.number }, 'pr', ['pr-reviewer']),
+				),
+			);
 			await dispatch(prReviewer, {
 				id: channel.conversationKey({ owner, repo, issueNumber: pull_request.number }),
 				input: {
