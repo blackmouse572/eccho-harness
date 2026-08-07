@@ -86,7 +86,8 @@ export const channel = createGitHubChannel({
 		const state = stateStub(c);
 
 		// GitHub can redeliver an event with the same deliveryId. Skip the
-		// duplicate so each delivery only admits (and writes) work once.
+		// duplicate so each delivery only admits (and writes) work once. On
+		// failure below the marker is removed so a redelivery reprocesses it.
 		if (delivery.deliveryId) {
 			const isDuplicate = (await withState(state, (s) => s.recordDelivery(delivery.deliveryId!))) === false;
 			if (isDuplicate) {
@@ -95,6 +96,7 @@ export const channel = createGitHubChannel({
 			}
 		}
 
+		try {
 		// --- New / reopened PR, or new commits pushed to a PR -----------------
 		if (delivery.name === 'pull_request') {
 			const { action } = delivery.payload;
@@ -173,6 +175,9 @@ export const channel = createGitHubChannel({
 						reason: 'New commits pushed to the pull request.',
 					},
 				});
+				// Commit the head only after the dispatch succeeded, so a failed
+				// dispatch stays retryable (never locks the head as reviewed).
+				await withState(state, (s) => s.markHeadDispatched(id, after));
 				return;
 			}
 
@@ -347,5 +352,13 @@ export const channel = createGitHubChannel({
 		}
 
 		console.log(`[webhook] unhandled event=${delivery.name}`);
+		} catch (error) {
+			// Un-mark the delivery so a failed webhook can be reprocessed on
+			// GitHub redelivery (same deliveryId) instead of being dropped.
+			if (delivery.deliveryId) {
+				await withState(state, (s) => s.forgetDelivery(delivery.deliveryId!));
+			}
+			throw error;
+		}
 	},
 });

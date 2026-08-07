@@ -83,11 +83,37 @@ export class FlueGithubState extends DurableObject<StateEnv> {
 		return (Number.isFinite(seconds) && seconds > 0 ? seconds : 300) * 1000;
 	}
 
+	// Union the existing per-conversation agents with the ones handling this
+	// event, so the cleanup cron can address every instance holding data for a
+	// conversation (an issue is handled by classifier AND triager, for example).
+	private mergeAgents(key: string, incoming: string[]): string {
+		const row = this.ctx.storage.sql.exec('SELECT agents FROM conversations WHERE key = ?', key).toArray()[0];
+		const existing = parseAgents(row?.agents);
+		return JSON.stringify([...new Set([...existing, ...incoming])]);
+	}
+
 	async recordDelivery(id: string): Promise<boolean> {
 		const inserted = this.ctx.storage.sql
 			.exec('INSERT OR IGNORE INTO deliveries (id, seen_at) VALUES (?, ?) RETURNING id', id, Date.now())
 			.toArray();
 		return inserted.length > 0;
+	}
+
+	// Un-mark a delivery so a failed webhook can be reprocessed on redelivery
+	// (GitHub reuses the same deliveryId when redelivering a failed delivery).
+	async forgetDelivery(id: string): Promise<void> {
+		this.ctx.storage.sql.exec('DELETE FROM deliveries WHERE id = ?', id);
+	}
+
+	// Commit the reviewed head only AFTER a dispatch succeeded. Kept separate so
+	// a failed dispatch never locks a head as already-reviewed.
+	async markHeadDispatched(key: string, headSha: string): Promise<void> {
+		this.ctx.storage.sql.exec(
+			'UPDATE conversations SET last_head_sha = ?, last_activity_at = ?, pending_head = NULL, pending_since = NULL WHERE key = ?',
+			headSha,
+			Date.now(),
+			key,
+		);
 	}
 
 	// Record a dispatch. Returns false when the PR head was already dispatched,
@@ -123,7 +149,7 @@ export class FlueGithubState extends DurableObject<StateEnv> {
 			record.repo,
 			record.number,
 			record.kind,
-			JSON.stringify(record.agents),
+			this.mergeAgents(record.key, record.agents),
 			record.headSha ?? null,
 			now,
 			now,
@@ -134,7 +160,9 @@ export class FlueGithubState extends DurableObject<StateEnv> {
 	// Synchronize handling with trailing-edge debounce: a push within the
 	// cooldown window after the last dispatch is remembered as `pending_head`
 	// and reviewed by the alarm once the burst goes quiet. Returns whether the
-	// webhook should dispatch a review now.
+	// webhook should dispatch a review now. The reviewed head is NOT committed
+	// here — the webhook calls `markHeadDispatched` only after the dispatch
+	// succeeds, so a failed dispatch stays retryable.
 	async maybeDispatchSynchronize(record: ConversationRecord & { headSha: string }): Promise<boolean> {
 		const now = Date.now();
 		const cooldown = this.cooldownMs();
@@ -161,7 +189,7 @@ export class FlueGithubState extends DurableObject<StateEnv> {
 				record.repo,
 				record.number,
 				record.kind,
-				JSON.stringify(record.agents),
+				this.mergeAgents(record.key, record.agents),
 				record.headSha,
 				now,
 				now,
@@ -171,13 +199,12 @@ export class FlueGithubState extends DurableObject<StateEnv> {
 		}
 
 		this.ctx.storage.sql.exec(
-			`INSERT INTO conversations (key, owner, repo, number, kind, agents, state, last_head_sha, last_dispatch_at, last_activity_at)
-			 VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+			`INSERT INTO conversations (key, owner, repo, number, kind, agents, state, last_dispatch_at, last_activity_at)
+			 VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)
 			 ON CONFLICT(key) DO UPDATE SET
 			   owner = excluded.owner, repo = excluded.repo, number = excluded.number, kind = excluded.kind,
 			   agents = excluded.agents,
 			   state = CASE WHEN conversations.state = 'closed' THEN 'open' ELSE conversations.state END,
-			   last_head_sha = excluded.last_head_sha,
 			   last_dispatch_at = excluded.last_dispatch_at,
 			   last_activity_at = excluded.last_activity_at,
 			   pending_head = NULL, pending_since = NULL`,
@@ -186,8 +213,7 @@ export class FlueGithubState extends DurableObject<StateEnv> {
 			record.repo,
 			record.number,
 			record.kind,
-			JSON.stringify(record.agents),
-			record.headSha,
+			this.mergeAgents(record.key, record.agents),
 			now,
 			now,
 		);
@@ -206,7 +232,7 @@ export class FlueGithubState extends DurableObject<StateEnv> {
 			record.repo,
 			record.number,
 			record.kind,
-			JSON.stringify(record.agents),
+			this.mergeAgents(record.key, record.agents),
 			now,
 			now,
 			now,
@@ -265,7 +291,11 @@ export class FlueGithubState extends DurableObject<StateEnv> {
 			.exec('SELECT MIN(pending_since) AS earliest FROM conversations WHERE pending_head IS NOT NULL')
 			.toArray()[0];
 		if (remaining && typeof remaining.earliest === 'number') {
-			await this.ctx.storage.setAlarm(remaining.earliest + cooldown);
+			// Never re-arm in the past: a failed dispatch (or a late alarm) leaves
+			// pending_since behind, so clamp to at least a full cooldown from now
+			// to avoid a tight retry loop.
+			const next = Math.max(now + cooldown, remaining.earliest + cooldown);
+			await this.ctx.storage.setAlarm(next);
 		}
 	}
 

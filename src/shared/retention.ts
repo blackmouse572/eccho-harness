@@ -141,17 +141,24 @@ export interface RetentionResult {
 // Flue runtime can only degrade cleanup, not break agent execution.
 export function cleanupRetainedData(sql: Sql, instanceId: string, cutoffMs: number): RetentionResult {
 	const result: RetentionResult = { sessions: 0, submissions: 0 };
+	const seen = new Set<string>();
 	try {
 		const rows = sql.exec('SELECT id FROM flue_sessions').toArray();
 		for (const row of rows) {
 			if (typeof row.id !== 'string') continue;
 			const parsed = parseSessionKey(row.id);
 			if (!parsed || parsed.instanceId !== instanceId) continue;
-			if (hasUnsettledSubmissions(sql, row.id)) continue;
-			const tree = collectSessionTree(sql, row.id);
+			// A child session may also be listed as a row of its own after its
+			// parent was already processed — only touch keys not yet reclaimed.
+			const tree = collectSessionTree(sql, row.id).filter((key) => !seen.has(key));
+			if (tree.length === 0) continue;
+			for (const key of tree) seen.add(key);
 			const active = tree.some((key) => hasUnsettledSubmissions(sql, key));
 			if (active) continue;
-			if (sessionLastActivity(sql, row.id) >= cutoffMs) continue;
+			// Guard the whole tree: skip unless every session in it (including
+			// child task/action sessions) is older than the cutoff.
+			const recent = tree.some((key) => sessionLastActivity(sql, key) >= cutoffMs);
+			if (recent) continue;
 			for (const key of tree) result.submissions += deleteSettledSubmissions(sql, key, cutoffMs);
 			for (const key of tree) deleteSessionData(sql, key);
 			result.sessions += tree.length;
