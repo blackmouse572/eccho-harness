@@ -3,8 +3,8 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "dev": "flue dev --target cloudflare",
-    "build": "flue build --target cloudflare",
+    "dev": "node init && flue dev --target cloudflare",
+    "build": "node init && flue build --target cloudflare",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test",
     "check": "bunx tsc --noEmit && bun test",
