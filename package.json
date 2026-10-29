@@ -27,9 +27,7 @@
     "@octokit/rest": "^22.0.1",
     "agents": "^0.14.2",
     "braintrust": "3.17.0",
-    "dotenv": "^8.2.0",
     "hono": "^4.12.27",
-    "node-fetch": "^3.3.2",
     "valibot": "^1.4.1"
   }
 }
